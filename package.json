@@ -9,7 +9,8 @@
     "build": "pnpm --filter @huajian/server build",
     "start": "pnpm --filter @huajian/server start",
     "typecheck": "pnpm --filter @huajian/server typecheck",
-    "test:mock-e2e": "node scripts/mock-e2e.mjs"
+    "test:mock-e2e": "node scripts/mock-e2e.mjs",
+    "test:docker-smoke": "node scripts/docker-smoke-local.mjs"
   },
   "engines": {
     "node": ">=20"

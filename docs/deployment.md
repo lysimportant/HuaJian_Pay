@@ -154,10 +154,44 @@ location / {
 
 ---
 
-## 8. 文档历史
+## 8. 无 Docker CLI 的等价冒烟（本机已验证）
+
+当主机没有 `docker` 时，用与 Dockerfile 相同的构建/部署语义验证：
+
+```bash
+# 等价：build server+admin → pnpm deploy --prod → node dist/index.js + /health
+node scripts/docker-smoke-local.mjs
+```
+
+脚本会：
+
+1. `pnpm --filter @huajian/server build`
+2. `pnpm --filter @huajian/admin build`
+3. `pnpm --filter @huajian/server deploy --prod .tmp/docker-smoke/server`
+4. 检查 `dist/index.js` 与生产依赖（fastify / @libsql）
+5. 临时 `DB_DSN=.tmp/docker-smoke/data/huajian_pay.db`、`PORT=18080` 启动并 `GET /health`
+6. 结束后杀掉进程（`.tmp/` 已 gitignore）
+
+### 静态审计结论（FileManager）
+
+| 项 | 结论 |
+| --- | --- |
+| Dockerfile 多阶段 | deps → build(server+admin) → `pnpm deploy --prod /out/server` → runtime |
+| 运行入口 | `CMD ["node","dist/index.js"]`，与 deploy 布局一致（冒烟已证） |
+| 非 root | `USER huajian` (uid 1001)；`/data` chown |
+| SQLite volume | `VOLUME ["/data"]` + compose `huajian_pay_data:/data` + `DB_DSN=/data/huajian_pay.db` |
+| 密钥 | `.dockerignore` 排除 `.env`/密钥；compose 运行时 env 注入 |
+| Admin | 镜像内 `/app/admin-dist`；API **不**托管；compose `admin-ui` 挂载宿主机 `apps/admin/dist` + nginx 反代 `/admin/api` |
+| MySQL | **未实现**；compose 无 mysql 服务 |
+| 本机 `docker build` | 无 Docker CLI，未执行；以上为等价验证 |
+
+---
+
+## 9. 文档历史
 
 | 日期 | 变更 |
 | --- | --- |
 | 2026-07-25 | 首次纠正端口 8080、E2E、Docker/MySQL 未实现 |
 | 2026-07-25 | 去除不存在的根脚本说明 |
 | 2026-07-25 | **FileManager：** 落地 Dockerfile / .dockerignore / compose（SQLite volume）；Admin 侧车；明确 MySQL 未实现 |
+| 2026-07-25 | **FileManager：** `scripts/docker-smoke-local.mjs` 无 Docker 等价冒烟通过；静态审计结论入库 |
