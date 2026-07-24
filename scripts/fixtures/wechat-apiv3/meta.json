@@ -1,0 +1,10 @@
+{
+  "mch_id": "1900000001",
+  "app_id": "wx_test_appid_e2e",
+  "merchant_serial_no": "5157F09EFDC096DE15EBE81A47057A7232F1B8E1",
+  "platform_serial_no": "1DDE55AD98ED71D6EDD4A4A16996DE7B47773A8C",
+  "apiv3_key": "975d9903638ee570d5a81e3dd13fde21",
+  "currency": "CNY",
+  "notify_path": "/notify/wxpay",
+  "note": "E2E-only fixtures. Regenerate only if broken. Never production."
+}
