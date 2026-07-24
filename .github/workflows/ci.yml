@@ -1,10 +1,10 @@
 name: CI
 
+# GitHub 当前因仓库所有者账户的计费锁定而拒绝启动托管 Runner。
+# 暂时仅允许手动触发，避免每次推送都产生一个必然失败的检查；
+# 计费状态恢复后再恢复 push / pull_request 自动触发。
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}

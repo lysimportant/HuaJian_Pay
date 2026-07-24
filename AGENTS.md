@@ -4,7 +4,7 @@
 **Repo:** https://github.com/lysimportant/HuaJian_Pay.git  
 **Workspace:** `D:\pay\HuaJian_Pay`  
 **Encoding:** UTF-8  
-**Language:** English for code, paths, commits, tags, branch names; Chinese OK for product copy and user docs.
+**Language:** English for code identifiers, APIs, paths, tags, and branch names; use Chinese for Git commit/push summaries, product copy, and user docs.
 
 ---
 
@@ -92,10 +92,10 @@ Default branch: `main`
    - Do not batch many unrelated steps without intermediate pushes if the step is already reviewable.
 
 2. **Commit message style**  
-   - English, imperative, scoped:  
-     - `feat(pay): add alipay notify verify`  
-     - `docs(agents): define team responsibilities`  
-     - `chore(git): add gitignore and readme`
+   - 使用中文摘要，保留英文 Conventional Commit 类型与可选 scope：
+     - `feat(pay): 增加支付宝回调验签`
+     - `docs(agents): 明确团队职责`
+     - `chore(git): 完善忽略规则和项目说明`
 
 3. **Tags for major versions / large milestones**  
    - Tag format: `vMAJOR.MINOR.PATCH` (semver).  
@@ -200,7 +200,7 @@ Treat as recoverable: provider rate limits (429), gateway/network/DNS failures, 
 2. Prefer plan files from Planner over tribal memory.
 3. Bug fix order: **locate → fix behavior → types/style last**.
 4. Security first for payment: verify sign, idempotent notify, amount/order match, no secret leakage.
-5. Chinese product UX OK; **code identifiers, APIs, git, paths in English**.
+5. Chinese product UX and Git commit/push summaries are required; **code identifiers, APIs, paths, tags, and branch names remain in English**.
 6. After each assigned task slice: update progress notes + commit + push.
 7. Dependent work is sequential: do not park a teammate on “wait until X finishes” (timeout risk). Lead dispatches B only after A reports done.
 
