@@ -26,10 +26,13 @@ const port = Number(process.env.SMOKE_PORT || 18080);
 
 function run(cmd, args, opts = {}) {
   console.log('+', cmd, args.join(' '));
-  const r = spawnSync(cmd, args, {
+  const isWindows = process.platform === 'win32';
+  const executable = isWindows ? process.env.ComSpec || 'cmd.exe' : cmd;
+  const commandArgs = isWindows ? ['/d', '/s', '/c', cmd, ...args] : args;
+  const r = spawnSync(executable, commandArgs, {
     cwd: root,
     stdio: 'inherit',
-    shell: process.platform === 'win32',
+    shell: false,
     env: process.env,
     ...opts,
   });
