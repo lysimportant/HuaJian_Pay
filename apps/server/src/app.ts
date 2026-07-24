@@ -1,5 +1,7 @@
 import Fastify from "fastify";
 import { env } from "./config/env.js";
+import { adminRoutes } from "./routes/admin.js";
+import { channelRoutes } from "./routes/channels.js";
 import { healthRoutes } from "./routes/health.js";
 import { payRoutes } from "./routes/pay.js";
 
@@ -31,10 +33,14 @@ export async function buildApp() {
     name: env.appName,
     health: "/health",
     classic: ["/submit.php", "/mapi.php", "/api.php"],
+    channels: ["/channels/alipay/notify"],
+    admin: "/admin/api/*",
   }));
 
   await app.register(healthRoutes);
   await app.register(payRoutes);
+  await app.register(channelRoutes);
+  await app.register(adminRoutes);
 
   return app;
 }

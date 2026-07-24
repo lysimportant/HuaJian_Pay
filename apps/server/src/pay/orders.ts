@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { and, eq } from "drizzle-orm";
+import { getAlipayChannel } from "../channels/index.js";
 import { env } from "../config/env.js";
 import { getDb, merchants, orders, type Order } from "../db/index.js";
 import { centsToMoney, moneyToCents } from "./sign.js";
@@ -56,16 +57,18 @@ export async function createOrder(
     throw Object.assign(new Error("unsupported type"), { code: -2 });
   }
 
+  if (input.type === "wxpay") {
+    // Interface reserved; live WeChat is out of scope for Alipay MVP.
+    throw Object.assign(new Error("wxpay not enabled in MVP"), { code: -2 });
+  }
+
   const amountCents = moneyToCents(input.money);
   const tradeNo = generateTradeNo();
   const now = Date.now();
   const expiredAt = now + 30 * 60 * 1000;
 
-  // Placeholder pay targets for Slice C; Slice D will set real channel QR/URL.
-  const payurl = `${env.appUrl}/pay/${tradeNo}`;
-  const qrcode = `${env.appUrl}/pay/qr/${tradeNo}`;
-
   const db = getDb();
+  let order: Order;
   try {
     const inserted = await db
       .insert(orders)
@@ -82,15 +85,14 @@ export async function createOrder(
         returnUrl: input.returnUrl ?? "",
         param: input.param ?? "",
         clientIp: input.clientIp ?? null,
-        payUrl: payurl,
-        qrCode: qrcode,
+        payUrl: "",
+        qrCode: "",
         expiredAt,
         createdAt: now,
         updatedAt: now,
       })
       .returning();
-
-    return { order: inserted[0], payurl, qrcode };
+    order = inserted[0];
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.toLowerCase().includes("unique")) {
@@ -99,6 +101,34 @@ export async function createOrder(
       });
     }
     throw err;
+  }
+
+  try {
+    const channel = await getAlipayChannel();
+    const pre = await channel.precreate({
+      order,
+      subject: input.name,
+      notifyUrl: env.alipayNotifyUrl || `${env.appUrl}/channels/alipay/notify`,
+      returnUrl: input.returnUrl || env.alipayReturnUrl || env.appUrl,
+    });
+
+    const updated = await db
+      .update(orders)
+      .set({
+        payUrl: pre.payurl,
+        qrCode: pre.qrcode,
+        channelTradeNo: pre.channelTradeNo ?? null,
+        updatedAt: Date.now(),
+      })
+      .where(eq(orders.id, order.id))
+      .returning();
+
+    order = updated[0];
+    return { order, payurl: pre.payurl, qrcode: pre.qrcode };
+  } catch (err) {
+    // Keep pending order for investigation; surface channel error to API.
+    const message = err instanceof Error ? err.message : "channel precreate failed";
+    throw Object.assign(new Error(message), { code: -4 });
   }
 }
 
