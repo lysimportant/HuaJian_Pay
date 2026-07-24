@@ -1,0 +1,16 @@
+{
+  "name": "huajian-pay",
+  "private": true,
+  "version": "0.2.0",
+  "description": "HuaJian_Pay — YiPay-compatible payment gateway",
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "pnpm --filter @huajian/server dev",
+    "build": "pnpm --filter @huajian/server build",
+    "start": "pnpm --filter @huajian/server start",
+    "typecheck": "pnpm --filter @huajian/server typecheck"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
