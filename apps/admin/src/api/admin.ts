@@ -20,6 +20,10 @@ export function fetchOrder(tradeNo: string) {
   return api.get(`/orders/${encodeURIComponent(tradeNo)}`) as Promise<any>
 }
 
+export function resendOrderNotify(tradeNo: string) {
+  return api.post(`/orders/${encodeURIComponent(tradeNo)}/notify/resend`) as Promise<any>
+}
+
 export function fetchAlipayChannel() {
   return api.get('/channels/alipay') as Promise<any>
 }

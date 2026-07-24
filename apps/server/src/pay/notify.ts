@@ -5,6 +5,22 @@ import { centsToMoney, signMd5 } from "./sign.js";
 const MAX_ATTEMPTS = 8;
 /** Retry delays in seconds (epay-like backoff) */
 const RETRY_DELAYS_SEC = [0, 15, 60, 300, 600, 1800, 3600, 7200];
+const inFlightNotifyOrderIds = new Set<number>();
+
+type ProcessNotifyOptions = {
+  force?: boolean;
+};
+
+type ProcessNotifyResult = {
+  processed: boolean;
+  reason?: string;
+  attemptNo?: number;
+  httpStatus?: number | null;
+  responseBody?: string;
+  success?: boolean;
+  nextRetryAt?: number | null;
+  notifyStatus?: Order["notifyStatus"];
+};
 
 function nextDelaySec(attemptNo: number): number {
   return RETRY_DELAYS_SEC[Math.min(attemptNo, RETRY_DELAYS_SEC.length - 1)] ?? 7200;
@@ -71,14 +87,33 @@ export async function enqueueMerchantNotify(orderId: number): Promise<void> {
     .where(eq(orders.id, orderId));
 }
 
-export async function processNotifyOrder(order: Order): Promise<void> {
+export async function processNotifyOrder(
+  order: Order,
+  options: ProcessNotifyOptions = {},
+): Promise<ProcessNotifyResult> {
+  if (inFlightNotifyOrderIds.has(order.id)) {
+    return { processed: false, reason: "in_progress" };
+  }
+
+  inFlightNotifyOrderIds.add(order.id);
+  try {
+    return await processNotifyOrderUnlocked(order, options);
+  } finally {
+    inFlightNotifyOrderIds.delete(order.id);
+  }
+}
+
+async function processNotifyOrderUnlocked(
+  order: Order,
+  options: ProcessNotifyOptions,
+): Promise<ProcessNotifyResult> {
   const db = getDb();
   if (!order.notifyUrl) {
     await db
       .update(orders)
       .set({ notifyStatus: "failed", updatedAt: Date.now() })
       .where(eq(orders.id, order.id));
-    return;
+    return { processed: false, reason: "missing_notify_url", notifyStatus: "failed" };
   }
 
   const merchantRows = await db
@@ -92,7 +127,7 @@ export async function processNotifyOrder(order: Order): Promise<void> {
       .update(orders)
       .set({ notifyStatus: "failed", updatedAt: Date.now() })
       .where(eq(orders.id, order.id));
-    return;
+    return { processed: false, reason: "missing_merchant", notifyStatus: "failed" };
   }
 
   const attemptRows = await db
@@ -101,12 +136,17 @@ export async function processNotifyOrder(order: Order): Promise<void> {
     .where(eq(notifyAttempts.orderId, order.id));
   const attemptNo = Number(attemptRows[0]?.n ?? 0) + 1;
 
-  if (attemptNo > MAX_ATTEMPTS) {
+  if (attemptNo > MAX_ATTEMPTS && !options.force) {
     await db
       .update(orders)
       .set({ notifyStatus: "failed", updatedAt: Date.now() })
       .where(eq(orders.id, order.id));
-    return;
+    return {
+      processed: false,
+      reason: "max_attempts_reached",
+      attemptNo,
+      notifyStatus: "failed",
+    };
   }
 
   const params = buildMerchantNotifyParams(order, merchant.pid, merchant.apiKey);
@@ -148,6 +188,71 @@ export async function processNotifyOrder(order: Order): Promise<void> {
       updatedAt: now,
     })
     .where(eq(orders.id, order.id));
+
+  return {
+    processed: true,
+    attemptNo,
+    httpStatus: status || null,
+    responseBody: body,
+    success,
+    nextRetryAt,
+    notifyStatus: success
+      ? "ok"
+      : attemptNo >= MAX_ATTEMPTS
+        ? "failed"
+        : "retrying",
+  };
+}
+
+export async function resendMerchantNotify(tradeNo: string): Promise<{
+  ok: boolean;
+  reason?: string;
+  order?: Pick<Order, "tradeNo" | "status" | "notifyStatus">;
+  attempt?: ProcessNotifyResult;
+}> {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(orders)
+    .where(eq(orders.tradeNo, tradeNo))
+    .limit(1);
+  const order = rows[0];
+  if (!order) return { ok: false, reason: "order_not_found" };
+  if (order.status !== "paid") {
+    return {
+      ok: false,
+      reason: "order_not_paid",
+      order: {
+        tradeNo: order.tradeNo,
+        status: order.status,
+        notifyStatus: order.notifyStatus,
+      },
+    };
+  }
+
+  const attempt = await processNotifyOrder(order, { force: true });
+  if (!attempt.processed) {
+    return {
+      ok: false,
+      reason: attempt.reason,
+      order: {
+        tradeNo: order.tradeNo,
+        status: order.status,
+        notifyStatus: attempt.notifyStatus ?? order.notifyStatus,
+      },
+      attempt,
+    };
+  }
+
+  return {
+    ok: true,
+    order: {
+      tradeNo: order.tradeNo,
+      status: order.status,
+      notifyStatus: attempt.notifyStatus ?? order.notifyStatus,
+    },
+    attempt,
+  };
 }
 
 export async function runNotifySweep(limit = 20): Promise<number> {

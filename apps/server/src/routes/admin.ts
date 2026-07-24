@@ -1,15 +1,17 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { env } from "../config/env.js";
 import {
   channelConfigs,
   getDb,
   merchants,
+  notifyAttempts,
   orders,
   verifyPassword,
 } from "../db/index.js";
 import { adminUsers } from "../db/schema.js";
+import { resendMerchantNotify } from "../pay/notify.js";
 import { centsToMoney } from "../pay/sign.js";
 
 type SessionPayload = {
@@ -239,6 +241,16 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       .limit(1);
     const o = rows[0];
     if (!o) return reply.code(404).send({ code: 404, msg: "not found" });
+    const attemptCountRows = await db
+      .select({ n: sql<number>`count(*)` })
+      .from(notifyAttempts)
+      .where(eq(notifyAttempts.orderId, o.id));
+    const attemptRows = await db
+      .select()
+      .from(notifyAttempts)
+      .where(eq(notifyAttempts.orderId, o.id))
+      .orderBy(desc(notifyAttempts.attemptNo))
+      .limit(10);
     return {
       code: 0,
       order: {
@@ -260,7 +272,46 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         channel_trade_no: o.channelTradeNo,
         created_at: o.createdAt,
         paid_at: o.paidAt,
+        notify_count: Number(attemptCountRows[0]?.n ?? 0),
+        notify_attempts: attemptRows.map((a) => ({
+          id: a.id,
+          attempt_no: a.attemptNo,
+          http_status: a.httpStatus,
+          response_body: a.responseBody,
+          success: a.success,
+          next_retry_at: a.nextRetryAt,
+          created_at: a.createdAt,
+        })),
       },
+    };
+  });
+
+  app.post("/admin/api/orders/:tradeNo/notify/resend", async (req, reply) => {
+    const session = await requireAdmin(req, reply);
+    if (!session) return;
+
+    const { tradeNo } = req.params as { tradeNo: string };
+    const result = await resendMerchantNotify(tradeNo);
+    if (!result.ok) {
+      const status =
+        result.reason === "order_not_found"
+          ? 404
+          : result.reason === "in_progress"
+            ? 409
+            : 400;
+      return reply.code(status).send({
+        code: status,
+        msg: result.reason || "resend notify failed",
+        order: result.order,
+        attempt: result.attempt,
+      });
+    }
+
+    return {
+      code: 0,
+      msg: result.attempt?.success ? "notify success" : "notify attempted",
+      order: result.order,
+      attempt: result.attempt,
     };
   });
 
