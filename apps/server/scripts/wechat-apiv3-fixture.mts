@@ -204,6 +204,57 @@ async function main() {
   }
   assert(amountRejected, "amount mismatch must throw");
 
+  let missingMchRejected = false;
+  try {
+    assertTransactionMatchesOrder(
+      { ...tx, mchid: undefined },
+      order,
+      { mchId: MCH_ID, appId: APP_ID },
+    );
+  } catch {
+    missingMchRejected = true;
+  }
+  assert(missingMchRejected, "missing mchid must throw (not skip)");
+
+  let currencyRejected = false;
+  try {
+    assertTransactionMatchesOrder(
+      { ...tx, amount: { total: 100, currency: "USD" } },
+      order,
+      { mchId: MCH_ID, appId: APP_ID },
+    );
+  } catch {
+    currencyRejected = true;
+  }
+  assert(currencyRejected, "currency mismatch must throw");
+
+  let stateRejected = false;
+  try {
+    assertTransactionMatchesOrder(
+      { ...tx, trade_state: "NOTPAY" },
+      order,
+      { mchId: MCH_ID, appId: APP_ID },
+    );
+  } catch {
+    stateRejected = true;
+  }
+  assert(stateRejected, "non-SUCCESS trade_state must throw");
+
+  // re-serialized body must fail against original platform signature
+  const reSerialized = JSON.stringify(JSON.parse(rawBody));
+  if (reSerialized !== rawBody) {
+    assert(
+      !verifyNotifySignature({
+        timestamp: nts,
+        nonce: nnonce,
+        body: reSerialized,
+        signature: nsig,
+        platformPublicKeyPem: publicKey,
+      }),
+      "re-serialized body must fail (raw body required)",
+    );
+  }
+
   // 4) AES unit
   const round = decryptAes256Gcm({
     apiV3Key: API_V3_KEY,

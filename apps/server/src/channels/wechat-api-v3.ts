@@ -276,31 +276,37 @@ export function assertTransactionMatchesOrder(
   order: Order,
   cfg: Pick<WechatApiV3Config, "mchId" | "appId">,
 ): void {
-  if (tx.mchid && tx.mchid !== cfg.mchId) {
+  // P0: required identity fields must be present and match (missing ≠ skip check).
+  if (!tx.mchid || tx.mchid !== cfg.mchId) {
     throw Object.assign(new Error("mchid mismatch"), { code: "MCH_MISMATCH" });
   }
-  if (tx.appid && tx.appid !== cfg.appId) {
+  if (!tx.appid || tx.appid !== cfg.appId) {
     throw Object.assign(new Error("appid mismatch"), { code: "APP_MISMATCH" });
   }
   // out_trade_no for WeChat is our platform trade_no
-  if (tx.out_trade_no && tx.out_trade_no !== order.tradeNo) {
+  if (!tx.out_trade_no || tx.out_trade_no !== order.tradeNo) {
     throw Object.assign(new Error("out_trade_no mismatch"), {
       code: "OUT_TRADE_NO_MISMATCH",
     });
   }
-  if (tx.amount?.total !== undefined && tx.amount.total !== order.amountCents) {
+  if (
+    tx.amount?.total === undefined ||
+    tx.amount.total === null ||
+    tx.amount.total !== order.amountCents
+  ) {
     throw Object.assign(new Error("amount mismatch"), {
       code: "AMOUNT_MISMATCH",
     });
   }
-  if (tx.amount?.currency && tx.amount.currency !== "CNY") {
+  const currency = (tx.amount.currency || "").toUpperCase();
+  if (currency !== "CNY") {
     throw Object.assign(new Error("currency mismatch"), {
       code: "CURRENCY_MISMATCH",
     });
   }
   const state = (tx.trade_state || "").toUpperCase();
-  if (state && state !== "SUCCESS") {
-    throw Object.assign(new Error(`trade_state not success: ${state}`), {
+  if (state !== "SUCCESS") {
+    throw Object.assign(new Error(`trade_state not success: ${state || "missing"}`), {
       code: "STATE_NOT_SUCCESS",
     });
   }

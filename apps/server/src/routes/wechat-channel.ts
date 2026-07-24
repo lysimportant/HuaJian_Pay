@@ -34,11 +34,19 @@ export async function wechatChannelRoutes(app: FastifyInstance): Promise<void> {
     );
 
     scope.post("/channels/wxpay/notify", async (req, reply) => {
+      // P0: only exact request bytes; never re-serialize parsed JSON for RSA verify.
       const rawBody =
-        (req as ReqWithRaw).rawBody ??
-        (typeof req.body === "string"
-          ? req.body
-          : JSON.stringify(req.body ?? {}));
+        typeof (req as ReqWithRaw).rawBody === "string"
+          ? (req as ReqWithRaw).rawBody!
+          : typeof req.body === "string"
+            ? req.body
+            : "";
+      if (!rawBody) {
+        req.log.error("wechat notify missing rawBody");
+        return reply
+          .code(500)
+          .send({ code: "FAIL", message: "无法获取原始报文" });
+      }
 
       const headers: WechatNotifyHeaders = {
         timestamp: String(req.headers["wechatpay-timestamp"] || ""),
@@ -47,7 +55,12 @@ export async function wechatChannelRoutes(app: FastifyInstance): Promise<void> {
         serial: String(req.headers["wechatpay-serial"] || ""),
       };
 
-      if (!headers.timestamp || !headers.nonce || !headers.signature) {
+      if (
+        !headers.timestamp ||
+        !headers.nonce ||
+        !headers.signature ||
+        !headers.serial
+      ) {
         return reply
           .code(401)
           .send({ code: "FAIL", message: "missing signature headers" });

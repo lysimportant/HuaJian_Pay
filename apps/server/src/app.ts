@@ -7,12 +7,43 @@ import { healthRoutes } from "./routes/health.js";
 import { payRoutes } from "./routes/pay.js";
 import { publicOrderRoutes } from "./routes/public-order.js";
 
+declare module "fastify" {
+  interface FastifyRequest {
+    /** Exact UTF-8 body bytes for WeChat APIv3 platform signature verification. */
+    rawBody?: string;
+  }
+}
+
 export async function buildApp() {
   const app = Fastify({
     logger: {
       level: env.appEnv === "production" ? "info" : "debug",
     },
   });
+
+  // Preserve raw JSON body for WeChat notify RSA verification (no re-serialize).
+  app.removeContentTypeParser("application/json");
+  app.addContentTypeParser(
+    "application/json",
+    { parseAs: "buffer" },
+    (req, body, done) => {
+      try {
+        const raw = Buffer.isBuffer(body)
+          ? body.toString("utf8")
+          : typeof body === "string"
+            ? body
+            : Buffer.from(body as ArrayBuffer).toString("utf8");
+        req.rawBody = raw;
+        if (!raw) {
+          done(null, {});
+          return;
+        }
+        done(null, JSON.parse(raw) as unknown);
+      } catch (err) {
+        done(err as Error, undefined);
+      }
+    },
+  );
 
   // Support classic form posts (application/x-www-form-urlencoded)
   app.addContentTypeParser(
