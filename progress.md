@@ -12,7 +12,11 @@
   - `1220179` merchant notify worker
   - `451bf6f` admin API skeleton
 - Tag **v0.3.0** — backend Alipay MVP
-- Next: AdminUI console against `/admin/api/*`
+- AdminUI on main (`fda9dd9`) + tag **v0.4.0**
+- PayCore newapi integration work:
+  - `docs/newapi-integration.md` — URL/pid/key/type/sign + mock/real switch
+  - `scripts/mock-e2e.mjs` + `pnpm test:mock-e2e` — deterministic mock smoke
+- Next: run mock E2E green, then harden / WeChat if needed
 
 ## 2026-07-24
 - Cloned empty repo to `D:\pay\HuaJian_Pay`
