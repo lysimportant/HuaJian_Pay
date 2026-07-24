@@ -21,13 +21,14 @@ const username = computed(() => getUsername() || 'admin')
 const menuOptions: MenuOption[] = [
   { label: '概览', key: '/dashboard' },
   { label: '订单', key: '/orders' },
-  { label: '支付宝', key: '/alipay' },
+  { label: '支付宝', key: '/channels/alipay' },
   { label: '商户', key: '/merchants' },
   { label: '设置', key: '/settings' },
 ]
 
 const activeKey = computed(() => {
   if (route.path.startsWith('/orders')) return '/orders'
+  if (route.path.startsWith('/channels')) return '/channels/alipay'
   return route.path
 })
 

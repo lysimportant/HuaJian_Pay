@@ -12,8 +12,9 @@ import {
   type DataTableColumns,
 } from 'naive-ui'
 import { createMerchant, fetchMerchants } from '../api/admin'
-import { pickMsg } from '../api/client'
-import { formatTime } from '../utils/format'
+import { pickMsg, formatTime } from '../utils/format'
+import PageHeader from '../components/PageHeader.vue'
+import EmptyState from '../components/EmptyState.vue'
 
 const message = useMessage()
 const loading = ref(false)
@@ -24,21 +25,31 @@ const createdSecret = ref('')
 
 const columns: DataTableColumns<any> = [
   { title: '商户名称', key: 'name' },
-  { title: '商户 PID', key: 'pid' },
+  {
+    title: '商户 PID',
+    key: 'pid',
+    render: (r) => h('span', { class: 'mono' }, String(r.pid ?? '-')),
+  },
   {
     title: '密钥',
     key: 'key',
     ellipsis: { tooltip: true },
-    render: (r) => r.key || r.secret || '******',
+    // Never surface raw secrets in list (audit P0)
+    render: () => h('span', { class: 'muted mono' }, '••••••••'),
   },
-  { title: '创建时间', key: 'created_at', render: (r) => formatTime(r.created_at || r.addtime) },
+  {
+    title: '创建时间',
+    key: 'created_at',
+    render: (r) => formatTime(r.created_at || r.addtime),
+  },
 ]
 
 async function load() {
   loading.value = true
   try {
     const res: any = await fetchMerchants()
-    rows.value = res?.data || res || []
+    const data = res?.data || res
+    rows.value = Array.isArray(data) ? data : data?.list || data?.items || []
   } catch (e: any) {
     message.error(pickMsg(e, '商户列表加载失败'))
   } finally {
@@ -69,29 +80,46 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="hero">
-    <div>
-      <h1>商户管理</h1>
-      <p>维护商户资料与 API 凭据</p>
-    </div>
-    <n-button type="primary" @click="openCreate">新增商户</n-button>
-  </div>
-  <n-card :bordered="false">
-    <n-data-table :columns="columns" :data="rows" :loading="loading" />
-  </n-card>
+  <div>
+    <PageHeader title="商户管理" description="维护商户资料；API 密钥仅在创建时展示一次">
+      <template #extra>
+        <NButton type="primary" @click="openCreate">新增商户</NButton>
+      </template>
+    </PageHeader>
+    <NCard :bordered="true" class="page-card">
+      <div class="table-scroll">
+        <NDataTable v-if="rows.length || loading" :columns="columns" :data="rows" :loading="loading" :bordered="false" />
+        <EmptyState
+          v-else
+          title="暂无商户"
+          description="创建商户后可获得 pid 与 API 密钥"
+        >
+          <template #action>
+            <NButton type="primary" @click="openCreate">新增商户</NButton>
+          </template>
+        </EmptyState>
+      </div>
+    </NCard>
 
-  <n-modal v-model:show="modal" preset="card" title="新增商户" style="width: 520px">
-    <n-form label-placement="top">
-      <n-form-item label="商户名称">
-        <n-input v-model:value="form.name" placeholder="可选，默认自动生成" />
-      </n-form-item>
-      <n-form-item label="商户 PID">
-        <n-input v-model:value="form.pid" placeholder="可选，默认自动生成" />
-      </n-form-item>
-      <n-form-item v-if="createdSecret" label="商户密钥（仅展示一次）">
-        <n-input :value="createdSecret" type="textarea" readonly :autosize="{ minRows: 2, maxRows: 4 }" />
-      </n-form-item>
-      <n-button type="primary" @click="save">{{ createdSecret ? '继续创建' : '确认创建' }}</n-button>
-    </n-form>
-  </n-modal>
+    <NModal v-model:show="modal" preset="card" title="新增商户" style="width: 520px">
+      <NForm label-placement="top">
+        <NFormItem label="商户名称">
+          <NInput v-model:value="form.name" placeholder="可选，默认自动生成" />
+        </NFormItem>
+        <NFormItem label="商户 PID">
+          <NInput v-model:value="form.pid" placeholder="可选，默认自动生成" />
+        </NFormItem>
+        <NFormItem v-if="createdSecret" label="商户密钥（仅展示一次）">
+          <NInput
+            :value="createdSecret"
+            type="textarea"
+            readonly
+            :autosize="{ minRows: 2, maxRows: 4 }"
+            class="mono"
+          />
+        </NFormItem>
+        <NButton type="primary" @click="save">{{ createdSecret ? '继续创建' : '确认创建' }}</NButton>
+      </NForm>
+    </NModal>
+  </div>
 </template>
