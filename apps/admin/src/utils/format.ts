@@ -1,40 +1,54 @@
 export function money(v: unknown): string {
   const n = Number(v || 0)
-  // backend money fields are yuan strings/numbers
-  if (String(v).includes('.') || n < 1000 && n !== Math.floor(n)) {
-    return `¥${n.toFixed(2)}`
-  }
-  // fallback treat large integers without decimal as cents only when clearly cents-like API
+  if (!Number.isFinite(n)) return '¥0.00'
   return `¥${n.toFixed(2)}`
 }
 
 export function formatTime(v: unknown): string {
   if (v == null || v === '') return '-'
   const n = Number(v)
-  const d = Number.isFinite(n) && String(Math.trunc(n)).length >= 10 ? new Date(n < 1e12 ? n * 1000 : n) : new Date(String(v))
+  const d =
+    Number.isFinite(n) && String(Math.trunc(n)).length >= 10
+      ? new Date(n < 1e12 ? n * 1000 : n)
+      : new Date(String(v))
   if (Number.isNaN(d.getTime())) return String(v)
   const pad = (x: number) => String(x).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
-export function statusLabel(status: string): string {
+export function statusLabel(status: unknown): string {
+  const key = String(status ?? '')
   const map: Record<string, string> = {
     pending: '待支付',
+    paying: '支付中',
     paid: '已支付',
+    success: '已支付',
     closed: '已关闭',
     failed: '失败',
+    expired: '已过期',
+    none: '未通知',
+    notify_pending: '通知中',
+    notify_success: '通知成功',
+    notify_failed: '通知失败',
     PENDING: '待支付',
     PAID: '已支付',
+    SUCCESS: '已支付',
     CLOSED: '已关闭',
+    FAILED: '失败',
+    EXPIRED: '已过期',
   }
-  return map[status] || status || '-'
+  return map[key] || key || '-'
 }
 
-export function statusType(status: string): 'default' | 'success' | 'warning' | 'error' | 'info' {
+export function statusType(
+  status: unknown,
+): 'default' | 'success' | 'warning' | 'error' | 'info' {
   const s = String(status || '').toLowerCase()
-  if (s === 'paid' || s === 'success') return 'success'
-  if (s === 'pending') return 'warning'
-  if (s === 'failed') return 'error'
-  if (s === 'closed') return 'default'
+  if (s === 'paid' || s === 'success' || s === 'notify_success') return 'success'
+  if (s === 'pending' || s === 'paying' || s === 'notify_pending') return 'warning'
+  if (s === 'failed' || s === 'notify_failed') return 'error'
+  if (s === 'closed' || s === 'expired' || s === 'none') return 'default'
   return 'info'
 }
+
+export { pickMsg } from '../api/client'

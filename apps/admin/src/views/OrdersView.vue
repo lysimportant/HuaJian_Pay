@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { h, onMounted, ref } from 'vue'
+import { h, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NButton,
@@ -7,46 +7,97 @@ import {
   NDataTable,
   NInput,
   NSelect,
-  NTag,
+  NSpace,
   useMessage,
   type DataTableColumns,
 } from 'naive-ui'
 import { fetchOrders } from '../api/admin'
-import { pickMsg } from '../api/client'
-import { formatTime, money, statusLabel, statusType } from '../utils/format'
+import { formatTime, money, pickMsg } from '../utils/format'
+import PageHeader from '../components/PageHeader.vue'
+import StatusTag from '../components/StatusTag.vue'
+import EmptyState from '../components/EmptyState.vue'
 
-const router = useRouter()
 const message = useMessage()
+const router = useRouter()
 const loading = ref(false)
-const rows = ref<any[]>([])
-const page = ref(1)
+const rows = ref<Record<string, unknown>[]>([])
 const total = ref(0)
-const keyword = ref('')
-const status = ref<string | null>(null)
+const query = reactive({
+  page: 1,
+  page_size: 20,
+  status: null as string | null,
+  keyword: '',
+})
 
-const columns: DataTableColumns<any> = [
-  { title: '平台订单号', key: 'trade_no', ellipsis: { tooltip: true } },
-  { title: '商户订单号', key: 'out_trade_no', ellipsis: { tooltip: true } },
-  { title: '金额', key: 'money', width: 110, render: (r) => money(r.money) },
+const statusOptions = [
+  { label: '全部状态', value: null as unknown as string },
+  { label: '待支付', value: 'pending' },
+  { label: '已支付', value: 'paid' },
+  { label: '已失败', value: 'failed' },
+  { label: '已关闭', value: 'closed' },
+  { label: '已过期', value: 'expired' },
+]
+
+const columns: DataTableColumns<Record<string, unknown>> = [
   {
-    title: '状态',
-    key: 'status',
-    width: 100,
-    render: (r) =>
-      h(NTag, { type: statusType(r.status), size: 'small', round: true }, { default: () => statusLabel(r.status) }),
+    title: '平台订单号',
+    key: 'trade_no',
+    minWidth: 180,
+    ellipsis: { tooltip: true },
+    render: (r) => h('span', { class: 'mono' }, String(r.trade_no ?? r.order_no ?? '-')),
   },
-  { title: '创建时间', key: 'addtime', width: 180, render: (r) => formatTime(r.addtime) },
+  {
+    title: '商户订单号',
+    key: 'out_trade_no',
+    minWidth: 160,
+    ellipsis: { tooltip: true },
+    render: (r) => h('span', { class: 'mono' }, String(r.out_trade_no ?? '-')),
+  },
+  {
+    title: '金额',
+    key: 'money',
+    width: 110,
+    render: (r) => h('span', { class: 'amount' }, money(r.money)),
+  },
+  {
+    title: '支付状态',
+    key: 'status',
+    width: 110,
+    render: (r) => h(StatusTag, { status: r.status as string | number }),
+  },
+  {
+    title: '通知状态',
+    key: 'notify_status',
+    width: 110,
+    render: (r) => h(StatusTag, { status: r.notify_status as string | number }),
+  },
+  {
+    title: '通道',
+    key: 'type',
+    width: 100,
+    render: (r) => String(r.type ?? r.channel ?? 'alipay'),
+  },
+  {
+    title: '创建时间',
+    key: 'created_at',
+    width: 170,
+    render: (r) => formatTime(r.created_at),
+  },
   {
     title: '操作',
     key: 'actions',
     width: 90,
+    fixed: 'right',
     render: (r) =>
       h(
         NButton,
         {
           text: true,
           type: 'primary',
-          onClick: () => router.push({ name: 'order-detail', params: { tradeNo: r.trade_no } }),
+          onClick: (e: MouseEvent) => {
+            e.stopPropagation()
+            openDetail(r)
+          },
         },
         { default: () => '详情' },
       ),
@@ -56,54 +107,109 @@ const columns: DataTableColumns<any> = [
 async function load() {
   loading.value = true
   try {
-    const res: any = await fetchOrders({
-      page: page.value,
-      page_size: 20,
-      trade_no: keyword.value || undefined,
-      out_trade_no: keyword.value || undefined,
-      status: status.value || undefined,
-    })
-    rows.value = res?.data?.items || res?.items || []
-    total.value = Number(res?.data?.total || res?.total || rows.value.length || 0)
-  } catch (e: any) {
-    message.error(pickMsg(e, '订单加载失败'))
+    const params: Record<string, unknown> = {
+      page: query.page,
+      page_size: query.page_size,
+    }
+    if (query.status) params.status = query.status
+    if (query.keyword) {
+      params.keyword = query.keyword
+      params.trade_no = query.keyword
+      params.out_trade_no = query.keyword
+    }
+    const data = await fetchOrders(params)
+    rows.value = (data?.list || data?.items || data?.orders || data?.data || []) as Record<
+      string,
+      unknown
+    >[]
+    total.value = Number(data?.total ?? rows.value.length)
+  } catch (e) {
+    message.error(pickMsg(e, '加载订单失败'))
   } finally {
     loading.value = false
   }
+}
+
+function openDetail(row: Record<string, unknown>) {
+  const id = row.trade_no || row.order_no
+  if (id) router.push(`/orders/${id}`)
+}
+
+function onPageChange(page: number) {
+  query.page = page
+  load()
+}
+
+function search() {
+  query.page = 1
+  load()
 }
 
 onMounted(load)
 </script>
 
 <template>
-  <div class="toolbar">
-    <n-input v-model:value="keyword" clearable placeholder="搜索平台/商户订单号" />
-    <n-select
-      v-model:value="status"
-      clearable
-      placeholder="订单状态"
-      :options="[
-        { label: '待支付', value: 'pending' },
-        { label: '已支付', value: 'paid' },
-        { label: '已关闭', value: 'closed' },
-      ]"
-    />
-    <n-button type="primary" :loading="loading" @click="() => { page = 1; load() }">查询</n-button>
+  <div>
+    <PageHeader title="订单" description="查询支付与通知状态，定位失败通知并进入详情处理" />
+
+    <NCard :bordered="true" class="page-card">
+      <div class="toolbar">
+        <NSelect
+          v-model:value="query.status"
+          :options="statusOptions"
+          placeholder="支付状态"
+          clearable
+          style="width: 160px"
+          @update:value="search"
+        />
+        <NInput
+          v-model:value="query.keyword"
+          clearable
+          placeholder="订单号 / 商户订单号"
+          style="max-width: 280px"
+          @keyup.enter="search"
+        />
+        <NSpace>
+          <NButton type="primary" :loading="loading" @click="search">查询</NButton>
+          <NButton
+            quaternary
+            @click="
+              query.keyword = '';
+              query.status = null;
+              search();
+            "
+          >
+            重置
+          </NButton>
+        </NSpace>
+      </div>
+
+      <div class="table-scroll">
+        <NDataTable
+          v-if="rows.length || loading"
+          :loading="loading"
+          :columns="columns"
+          :data="rows"
+          :bordered="false"
+          :row-key="(r) => String(r.trade_no ?? r.order_no ?? Math.random())"
+          :pagination="{
+            page: query.page,
+            pageSize: query.page_size,
+            itemCount: total,
+            onChange: onPageChange,
+          }"
+          :row-props="(row) => ({ style: 'cursor:pointer', onClick: () => openDetail(row) })"
+        />
+        <EmptyState
+          v-else
+          title="暂无订单"
+          description="调整筛选条件，或等待商户通过 API 创建订单"
+        >
+          <template #action>
+            <NButton type="primary" secondary @click="search">刷新</NButton>
+          </template>
+        </EmptyState>
+      </div>
+    </NCard>
   </div>
-  <n-card :bordered="false">
-    <n-data-table
-      :columns="columns"
-      :data="rows"
-      :loading="loading"
-      :pagination="{
-        page,
-        pageSize: 20,
-        itemCount: total,
-        onChange: (p: number) => {
-          page = p
-          load()
-        },
-      }"
-    />
-  </n-card>
 </template>

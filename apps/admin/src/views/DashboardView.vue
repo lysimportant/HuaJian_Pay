@@ -1,74 +1,117 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { NButton, NCard, NStatistic, useMessage } from 'naive-ui'
-import { fetchOrders, fetchMerchants } from '../api/admin'
-import { pickMsg } from '../api/client'
-import { money } from '../utils/format'
+import { h, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { NCard, NDataTable, NSpin, useMessage, type DataTableColumns } from 'naive-ui'
+import { fetchOrders } from '../api/admin'
+import { formatTime, money, pickMsg } from '../utils/format'
+import PageHeader from '../components/PageHeader.vue'
+import KpiCard from '../components/KpiCard.vue'
+import StatusTag from '../components/StatusTag.vue'
+import EmptyState from '../components/EmptyState.vue'
 
 const message = useMessage()
-const loading = ref(false)
-const summary = ref({
-  todayAmount: 0,
-  todayOrders: 0,
-  successRate: 0,
-  activeMerchants: 0,
-})
+const router = useRouter()
+const loading = ref(true)
+const orderCountVal = ref('0')
+const successCountVal = ref('0')
+const failNotifyVal = ref('0')
+const amountSumVal = ref('¥0.00')
+const recent = ref<Record<string, unknown>[]>([])
 
-async function load() {
+const columns: DataTableColumns<Record<string, unknown>> = [
+  {
+    title: '订单号',
+    key: 'trade_no',
+    ellipsis: { tooltip: true },
+    render: (r) => h('span', { class: 'mono' }, String(r.trade_no ?? r.order_no ?? '-')),
+  },
+  {
+    title: '金额',
+    key: 'money',
+    width: 120,
+    render: (r) => h('span', { class: 'amount' }, money(r.money)),
+  },
+  {
+    title: '状态',
+    key: 'status',
+    width: 120,
+    render: (r) => h(StatusTag, { status: r.status as string | number }),
+  },
+  {
+    title: '创建时间',
+    key: 'created_at',
+    width: 180,
+    render: (r) => formatTime(r.created_at),
+  },
+]
+
+function isPaid(status: unknown) {
+  const s = String(status || '').toLowerCase()
+  return s === 'paid' || s === 'success'
+}
+
+function isNotifyFailed(row: Record<string, unknown>) {
+  const n = String(row.notify_status || '').toLowerCase()
+  return n.includes('fail') || n === 'failed'
+}
+
+onMounted(async () => {
   loading.value = true
   try {
-    const [ordersRes, merchantsRes]: any[] = await Promise.all([
-      fetchOrders({ page: 1, page_size: 100 }),
-      fetchMerchants(),
-    ])
-    const items = ordersRes?.data?.items || ordersRes?.items || []
-    const total = Number(ordersRes?.data?.total || ordersRes?.total || items.length || 0)
-    const paid = items.filter((x: any) => String(x.status).toLowerCase() === 'paid')
-    const amount = paid.reduce((s: number, x: any) => s + Number(x.money || 0), 0)
-    const merchants = merchantsRes?.data || merchantsRes || []
-    summary.value = {
-      todayAmount: amount,
-      todayOrders: total,
-      successRate: total ? Math.round((paid.length / Math.max(items.length, 1)) * 100) : 0,
-      activeMerchants: Array.isArray(merchants) ? merchants.length : 0,
-    }
-  } catch (e: any) {
-    message.error(pickMsg(e, '概览加载失败'))
+    // No dedicated dashboard API in contract — derive from orders list
+    const data = await fetchOrders({ page: 1, page_size: 50 })
+    const list = (data?.list || data?.items || data?.orders || data?.data || []) as Record<
+      string,
+      unknown
+    >[]
+    recent.value = list.slice(0, 10)
+    const total = Number(data?.total ?? list.length)
+    orderCountVal.value = String(total)
+    const paid = list.filter((r) => isPaid(r.status))
+    successCountVal.value = String(paid.length)
+    amountSumVal.value = money(paid.reduce((sum, r) => sum + Number(r.money || 0), 0))
+    failNotifyVal.value = String(list.filter((r) => isPaid(r.status) && isNotifyFailed(r)).length)
+  } catch (e) {
+    message.error(pickMsg(e, '加载概览失败'))
   } finally {
     loading.value = false
   }
-}
+})
 
-onMounted(load)
+function openOrder(row: Record<string, unknown>) {
+  const id = row.trade_no || row.order_no
+  if (id) router.push(`/orders/${id}`)
+}
 </script>
 
 <template>
-  <div class="hero">
-    <div>
-      <h1>今日经营概览</h1>
-      <p>实时掌握平台关键经营指标</p>
-    </div>
-    <n-button :loading="loading" @click="load">刷新数据</n-button>
+  <div>
+    <PageHeader title="概览" description="基于订单列表汇总的经营快照；通知失败请到订单详情处理" />
+    <NSpin :show="loading">
+      <div class="stats-grid">
+        <KpiCard label="订单数" :value="orderCountVal" hint="列表接口 total / 当前页推断" />
+        <KpiCard label="成功金额" :value="amountSumVal" hint="当前样本中已支付汇总" />
+        <KpiCard label="支付成功" :value="successCountVal" />
+        <KpiCard label="通知失败" :value="failNotifyVal" hint="样本内支付成功且通知异常" />
+      </div>
+
+      <NCard title="最近订单" :bordered="true" class="page-card">
+        <div class="table-scroll">
+          <NDataTable
+            v-if="recent.length"
+            :columns="columns"
+            :data="recent"
+            :bordered="false"
+            size="small"
+            :row-props="(row) => ({ style: 'cursor:pointer', onClick: () => openOrder(row) })"
+          />
+          <EmptyState
+            v-else-if="!loading"
+            title="暂无最近订单"
+            description="创建支付订单后将显示在这里"
+          />
+        </div>
+      </NCard>
+    </NSpin>
   </div>
-  <div class="stats">
-    <n-card>
-      <n-statistic label="今日交易金额" :value="money(summary.todayAmount)" />
-      <small>已支付订单汇总</small>
-    </n-card>
-    <n-card>
-      <n-statistic label="今日订单" :value="summary.todayOrders" />
-      <small>全部支付订单</small>
-    </n-card>
-    <n-card>
-      <n-statistic label="成功率" :value="`${summary.successRate}%`" />
-      <small>支付成功占比</small>
-    </n-card>
-    <n-card>
-      <n-statistic label="活跃商户" :value="summary.activeMerchants" />
-      <small>正常运营商户</small>
-    </n-card>
-  </div>
-  <n-card title="运营提示" class="section">
-    <p>订单、商户与支付宝通道状态均可在左侧导航中集中管理。</p>
-  </n-card>
 </template>
