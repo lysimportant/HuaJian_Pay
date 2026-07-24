@@ -1,11 +1,11 @@
 # Progress
 
 ## 2026-07-25
-- Planner produced full `findings.md` (YiPay API, Alipay/WeChat feasibility, stack lock)
-- Lead sealed plan package: `docs/architecture.md`, `docs/api.md`, updated task_plan/progress
-- Pending push: architecture commit + tag `v0.2.0`
-- Next: PayCore implements `apps/server` Alipay MVP
+- Planner produced full `findings.md` (YiPay API, Alipay/WeChat feasibility, stack lock) — commit `0afcc2c`
+- Lead sealed plan package: `docs/architecture.md`, `docs/api.md`, updated task_plan/progress — commit `40eea63`, tag `v0.2.0`
 - Designer UX complete: `docs/ux/flows.md`, `docs/ux/ia.md`, `docs/ux/visual-system.md` (commit `ffc8e20`)
+- Architecture task board item completed by Planner
+- Next: PayCore implements `apps/server` Alipay MVP (task in_progress)
 - AdminUI can implement shell/channels/orders/pay against UX docs; align status enums with PayCore API when ready
 
 ## 2026-07-24
