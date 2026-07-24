@@ -32,6 +32,14 @@ export function updateAlipayChannel(body: Record<string, unknown>) {
   return api.put('/channels/alipay', body) as Promise<any>
 }
 
+export function fetchWxpayChannel() {
+  return api.get('/channels/wxpay') as Promise<any>
+}
+
+export function updateWxpayChannel(body: Record<string, unknown>) {
+  return api.put('/channels/wxpay', body) as Promise<any>
+}
+
 export function fetchMerchants() {
   return api.get('/merchants') as Promise<any>
 }

@@ -820,7 +820,13 @@ export function renderPayPage(data: PayPageBootstrap): string {
     if (data.type) state.type = String(data.type).toLowerCase();
     if (data.status != null) state.status = String(data.status);
     if (data.pay_url) state.payUrl = String(data.pay_url);
+    // WeChat Native code_url / classic qrcode aliases
     if (data.qr_url) state.qrUrl = String(data.qr_url);
+    else if (data.code_url) state.qrUrl = String(data.code_url);
+    else if (data.qrcode) state.qrUrl = String(data.qrcode);
+    if (!state.payUrl && (data.code_url || data.qrcode)) {
+      state.payUrl = String(data.code_url || data.qrcode || "");
+    }
     if (data.return_url != null) {
       state.returnUrl = isSafeUrl(String(data.return_url)) ? String(data.return_url) : "";
     }

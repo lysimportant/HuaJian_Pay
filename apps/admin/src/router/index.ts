@@ -38,6 +38,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '支付宝配置' },
       },
       {
+        path: 'channels/wxpay',
+        name: 'wxpay',
+        component: () => import('../views/WxpayView.vue'),
+        meta: { title: '微信支付配置' },
+      },
+      {
         path: 'merchants',
         name: 'merchants',
         component: () => import('../views/MerchantsView.vue'),

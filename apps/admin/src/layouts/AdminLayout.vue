@@ -22,13 +22,16 @@ const menuOptions: MenuOption[] = [
   { label: '概览', key: '/dashboard' },
   { label: '订单', key: '/orders' },
   { label: '支付宝', key: '/channels/alipay' },
+  { label: '微信支付', key: '/channels/wxpay' },
   { label: '商户', key: '/merchants' },
   { label: '设置', key: '/settings' },
 ]
 
 const activeKey = computed(() => {
   if (route.path.startsWith('/orders')) return '/orders'
-  if (route.path.startsWith('/channels')) return '/channels/alipay'
+  if (route.path.startsWith('/channels/wxpay')) return '/channels/wxpay'
+  if (route.path.startsWith('/channels/alipay')) return '/channels/alipay'
+  if (route.path.startsWith('/channels')) return route.path
   return route.path
 })
 
