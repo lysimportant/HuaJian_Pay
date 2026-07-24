@@ -15,6 +15,15 @@ import { setTimeout as sleep } from "node:timers/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import {
+  loadWechatFixtures,
+  buildMerchantAuthorization,
+  verifyMessageWithPublicKey,
+  buildAuthorizationMessage,
+  buildSignedNotifyRequest,
+  sampleTransaction,
+  aesGcmDecrypt,
+} from "./wechat-apiv3-crypto.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -265,6 +274,11 @@ async function assertAdminUnauthorized() {
     alipay.status === 401,
     `admin channels/alipay without token expected 401, got ${alipay.status}`,
   );
+  const wxpay = await httpRaw(`${BASE}/admin/api/channels/wxpay`);
+  assert(
+    wxpay.status === 401,
+    `admin channels/wxpay without token expected 401, got ${wxpay.status}`,
+  );
 }
 
 async function assertAlipayConfigNoSecretLeak() {
@@ -297,6 +311,309 @@ async function assertAlipayConfigNoSecretLeak() {
     );
   }
   return { token, config: c };
+}
+
+async function assertNativeRequestSignatureFixture() {
+  const fx = loadWechatFixtures();
+  const body = JSON.stringify({
+    appid: fx.meta.app_id,
+    mchid: fx.meta.mch_id,
+    description: "e2e-sign",
+    out_trade_no: "SIGNTEST1",
+    notify_url: "https://example.com/notify",
+    amount: { total: 1, currency: "CNY" },
+  });
+  const auth = buildMerchantAuthorization({
+    mchId: fx.meta.mch_id,
+    serialNo: fx.meta.merchant_serial_no,
+    privateKeyPem: fx.merchantPrivateKeyPem,
+    method: "POST",
+    canonicalUrl: "/v3/pay/transactions/native",
+    body,
+  });
+  const ok = verifyMessageWithPublicKey(
+    auth.message,
+    auth.signature,
+    fx.merchantPublicKeyPem,
+  );
+  assert(ok, "Native request signature must verify with merchant public key");
+
+  // Tamper body → signature must fail
+  const badMsg = buildAuthorizationMessage(
+    "POST",
+    "/v3/pay/transactions/native",
+    auth.timestampSec,
+    auth.nonceStr,
+    body + "x",
+  );
+  const bad = verifyMessageWithPublicKey(
+    badMsg,
+    auth.signature,
+    fx.merchantPublicKeyPem,
+  );
+  assert(!bad, "tampered body must fail signature verification");
+  return true;
+}
+
+async function seedWechatAdminConfig(token) {
+  const fx = loadWechatFixtures();
+  const put = await httpJson(`${BASE}/admin/api/channels/wxpay`, {
+    method: "PUT",
+    headers: {
+      "content-type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      enabled: true,
+      mch_id: fx.meta.mch_id,
+      app_id: fx.meta.app_id,
+      serial_no: fx.meta.merchant_serial_no,
+      api_v3_key: fx.apiV3Key,
+      private_key: fx.merchantPrivateKeyPem,
+      platform_public_key: fx.platformPublicKeyPem,
+      notify_url: `${BASE}/channels/wxpay/notify`,
+    }),
+  });
+  assert(
+    put.json.code === 0 || put.status === 200,
+    `seed wxpay config failed: ${put.text}`,
+  );
+
+  const get = await httpJson(`${BASE}/admin/api/channels/wxpay`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  assert(get.json.code === 0 && get.json.config, `get wxpay config failed: ${get.text}`);
+  const c = get.json.config;
+  // secrets must not echo full values
+  assert(
+    !c.api_v3_key || c.api_v3_key === "" || String(c.api_v3_key).includes("****"),
+    "wxpay GET must not echo full api_v3_key",
+  );
+  assert(
+    !c.private_key || c.private_key === "" || String(c.private_key).length < 40,
+    "wxpay GET must not echo full private_key",
+  );
+  assert(
+    !c.platform_public_key ||
+      c.platform_public_key === "" ||
+      String(c.platform_public_key).length < 40,
+    "wxpay GET must not echo full platform_public_key",
+  );
+  assertNoSensitiveKeys(get.json, "wxpay config");
+  return fx;
+}
+
+async function postWxNotify(signed) {
+  return httpRaw(`${BASE}/channels/wxpay/notify`, {
+    method: "POST",
+    headers: signed.headers,
+    body: signed.body,
+  });
+}
+
+async function runWechatApiv3Flow(merchant, adminToken) {
+  const fx = await seedWechatAdminConfig(adminToken);
+
+  // A: local fixture Native signature
+  await assertNativeRequestSignatureFixture();
+
+  // Create wxpay order via mapi (mock precreate → weixin:// code_url)
+  const outTradeNo = `E2EWX${Date.now()}`;
+  const money = "0.01";
+  const submitParams = {
+    pid: PID,
+    type: "wxpay",
+    out_trade_no: outTradeNo,
+    notify_url: merchant.state.url,
+    name: "wxpay-e2e",
+    money,
+    clientip: "127.0.0.1",
+    device: "jump",
+    sign_type: "MD5",
+  };
+  submitParams.sign = sign(submitParams, KEY);
+  const submit = await httpJson(`${BASE}/mapi.php`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(submitParams),
+  });
+  assert(submit.json.code === 1, `wxpay mapi failed: ${JSON.stringify(submit.json)}`);
+  const tradeNo = submit.json.trade_no;
+  assert(tradeNo, "missing wxpay trade_no");
+  const payurl = String(submit.json.payurl || submit.json.qrcode || "");
+  assert(
+    payurl.includes("weixin://") || payurl.includes("wxpay") || payurl.length > 0,
+    `wxpay payurl missing: ${payurl}`,
+  );
+
+  // Public status pending
+  const st1 = await getPublicStatus(tradeNo);
+  assert(
+    st1.data && (st1.data.status === "pending" || Number(st1.data.status) === 0),
+    `wx public pending failed: ${st1.text}`,
+  );
+
+  // Pay page should render for wxpay
+  const page = await httpRaw(`${BASE}/pay/${encodeURIComponent(tradeNo)}`);
+  assert(page.status === 200, `pay page status ${page.status}`);
+  assert(
+    page.text.toLowerCase().includes("微信") ||
+      page.text.toLowerCase().includes("wx") ||
+      page.text.includes("wxpay") ||
+      page.text.includes("weixin"),
+    "pay page should indicate wechat/wxpay",
+  );
+
+  // B/C: signed notify with AES-GCM → paid
+  const txOk = sampleTransaction({
+    mchid: fx.meta.mch_id,
+    appid: fx.meta.app_id,
+    out_trade_no: tradeNo,
+    amount: { total: 1, currency: "CNY" },
+    transaction_id: `wx_ok_${Date.now()}`,
+  });
+  // Sanity: decrypt round-trip of resource
+  const signedOk = buildSignedNotifyRequest({
+    platformPrivateKeyPem: fx.platformPrivateKeyPem,
+    platformSerialNo: fx.meta.platform_serial_no,
+    apiV3Key: fx.apiV3Key,
+    transaction: txOk,
+  });
+  const plain = aesGcmDecrypt(
+    fx.apiV3Key,
+    signedOk.bodyObj.resource.ciphertext,
+    signedOk.bodyObj.resource.nonce,
+    signedOk.bodyObj.resource.associated_data,
+  );
+  assert(JSON.parse(plain).out_trade_no === tradeNo, "AES-GCM decrypt mismatch");
+
+  const notify1 = await postWxNotify(signedOk);
+  assert(
+    notify1.status >= 200 && notify1.status < 300,
+    `wx notify success expected 2xx, got ${notify1.status}: ${notify1.text}`,
+  );
+
+  const st2 = await getPublicStatus(tradeNo);
+  assert(
+    st2.data && (st2.data.status === "paid" || Number(st2.data.status) === 1),
+    `wx public paid failed: ${st2.text}`,
+  );
+
+  // D: idempotent replay
+  const notify2 = await postWxNotify(signedOk);
+  assert(
+    notify2.status >= 200 && notify2.status < 300,
+    `wx notify replay expected 2xx, got ${notify2.status}: ${notify2.text}`,
+  );
+  const st3 = await getPublicStatus(tradeNo);
+  assert(
+    st3.data && (st3.data.status === "paid" || Number(st3.data.status) === 1),
+    "status must remain paid after replay",
+  );
+
+  // C: amount mismatch on a new order
+  const out2 = `E2EWXBAD${Date.now()}`;
+  const p2 = {
+    pid: PID,
+    type: "wxpay",
+    out_trade_no: out2,
+    notify_url: merchant.state.url,
+    name: "wxpay-bad-amount",
+    money: "0.01",
+    clientip: "127.0.0.1",
+    sign_type: "MD5",
+  };
+  p2.sign = sign(p2, KEY);
+  const s2 = await httpJson(`${BASE}/mapi.php`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(p2),
+  });
+  assert(s2.json.code === 1, `wxpay mapi2 failed: ${JSON.stringify(s2.json)}`);
+  const trade2 = s2.json.trade_no;
+  const badAmount = buildSignedNotifyRequest({
+    platformPrivateKeyPem: fx.platformPrivateKeyPem,
+    platformSerialNo: fx.meta.platform_serial_no,
+    apiV3Key: fx.apiV3Key,
+    transaction: sampleTransaction({
+      mchid: fx.meta.mch_id,
+      appid: fx.meta.app_id,
+      out_trade_no: trade2,
+      amount: { total: 9999, currency: "CNY" },
+    }),
+  });
+  const nBadAmt = await postWxNotify(badAmount);
+  assert(
+    nBadAmt.status >= 400,
+    `amount mismatch should reject, got ${nBadAmt.status}: ${nBadAmt.text}`,
+  );
+  const stBadAmt = await getPublicStatus(trade2);
+  assert(
+    stBadAmt.data &&
+      (stBadAmt.data.status === "pending" || Number(stBadAmt.data.status) === 0),
+    "amount mismatch must not mark paid",
+  );
+
+  // C: mchid mismatch
+  const badMch = buildSignedNotifyRequest({
+    platformPrivateKeyPem: fx.platformPrivateKeyPem,
+    platformSerialNo: fx.meta.platform_serial_no,
+    apiV3Key: fx.apiV3Key,
+    transaction: sampleTransaction({
+      mchid: "0000000000",
+      appid: fx.meta.app_id,
+      out_trade_no: trade2,
+      amount: { total: 1, currency: "CNY" },
+    }),
+  });
+  const nBadMch = await postWxNotify(badMch);
+  assert(nBadMch.status >= 400, `mchid mismatch should reject, got ${nBadMch.status}`);
+
+  // B: signature / timestamp tamper
+  const signedTamper = buildSignedNotifyRequest({
+    platformPrivateKeyPem: fx.platformPrivateKeyPem,
+    platformSerialNo: fx.meta.platform_serial_no,
+    apiV3Key: fx.apiV3Key,
+    transaction: sampleTransaction({
+      mchid: fx.meta.mch_id,
+      appid: fx.meta.app_id,
+      out_trade_no: trade2,
+      amount: { total: 1, currency: "CNY" },
+    }),
+  });
+  signedTamper.headers["Wechatpay-Signature"] = "AAAA" + signedTamper.headers["Wechatpay-Signature"].slice(4);
+  const nBadSig = await postWxNotify(signedTamper);
+  assert(nBadSig.status >= 400, `bad signature should reject, got ${nBadSig.status}`);
+
+  const signedOld = buildSignedNotifyRequest({
+    platformPrivateKeyPem: fx.platformPrivateKeyPem,
+    platformSerialNo: fx.meta.platform_serial_no,
+    apiV3Key: fx.apiV3Key,
+    transaction: sampleTransaction({
+      mchid: fx.meta.mch_id,
+      appid: fx.meta.app_id,
+      out_trade_no: trade2,
+      amount: { total: 1, currency: "CNY" },
+    }),
+    timestampSec: Math.floor(Date.now() / 1000) - 3600,
+  });
+  const nOld = await postWxNotify(signedOld);
+  assert(nOld.status >= 400, `stale timestamp should reject, got ${nOld.status}`);
+
+  // still pending after rejections
+  const stFinal = await getPublicStatus(trade2);
+  assert(
+    stFinal.data &&
+      (stFinal.data.status === "pending" || Number(stFinal.data.status) === 0),
+    "tamper cases must leave order pending",
+  );
+
+  return {
+    tradeNo,
+    outTradeNo,
+    payurl,
+    publicStatus: st2.data.status,
+  };
 }
 
 async function assertSubmitHtmlEscaped(merchant) {
@@ -472,10 +789,20 @@ async function main() {
     const alipay = await assertAlipayConfigNoSecretLeak();
 
     console.log("[e2e] check submit.php HTML escape...");
-    const htmlCase = await assertSubmitHtmlEscaped(merchant);
+    await assertSubmitHtmlEscaped(merchant);
 
-    console.log("[e2e] check mapi → public status → mock pay → notify...");
+    console.log("[e2e] check mapi → public status → mock pay → notify (alipay)...");
     const result = await runCorePayFlow(merchant);
+
+    console.log("[e2e] check wechat APIv3 regression...");
+    // reuse admin token from alipay login path
+    const login = await httpJson(`${BASE}/admin/api/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username: ADMIN_USER, password: ADMIN_PASS }),
+    });
+    assert(login.json.code === 0 && login.json.token, `admin re-login failed: ${login.text}`);
+    const wx = await runWechatApiv3Flow(merchant, login.json.token);
 
     console.log(
       JSON.stringify(
@@ -487,6 +814,12 @@ async function main() {
           notify_hits: result.notifyHits,
           public_status: result.publicStatus,
           payurl: result.payurl,
+          wxpay: {
+            trade_no: wx.tradeNo,
+            out_trade_no: wx.outTradeNo,
+            public_status: wx.publicStatus,
+            payurl: wx.payurl,
+          },
           started_server: startedByUs,
           checks: {
             admin_unauthorized: true,
@@ -495,6 +828,11 @@ async function main() {
             submit_html_escaped: true,
             public_status_pending_to_paid: true,
             mapi_query_notify: result.notifyHits >= 0,
+            wx_native_sign_fixture: true,
+            wx_aes_gcm_notify_paid: true,
+            wx_notify_idempotent: true,
+            wx_amount_mch_sig_ts_reject: true,
+            wx_pay_page_pending_to_paid: true,
           },
         },
         null,
