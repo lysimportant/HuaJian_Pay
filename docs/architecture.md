@@ -1,8 +1,7 @@
-# Architecture — HuaJian_Pay (locked for MVP)
+# Architecture — HuaJian_Pay
 
-**Owner:** Planner  
-**Status:** Locked 2026-07-25  
-**Based on:** `findings.md`
+**Status:** locked for MVP (from `findings.md`, 2026-07-25)  
+**Repo:** https://github.com/lysimportant/HuaJian_Pay.git
 
 ---
 
@@ -11,295 +10,185 @@
 | Item | Value |
 | --- | --- |
 | Product | HuaJian_Pay |
-| Upstream | newapi (merchant / billing caller) |
-| Protocol | YiPay-compatible merchant API + modern aliases |
-| Channel priority | Alipay (official OpenAPI) → WeChat (adapter ready, implement second) |
-| Stack | Node.js 20 + TypeScript + Fastify + Drizzle ORM + SQLite/MySQL + Vue 3 admin |
+| Upstream | **newapi** (billing / top-up) |
+| Merchant protocol | **YiPay-compatible** (MD5 classic + REST aliases) |
+| Channel P0 | **Alipay** Open Platform (precreate QR first) |
+| Channel P1 | **WeChat Pay** (adapter + config first; live after Alipay E2E) |
+| Operator UX | Configure channel credentials; settlement to bound merchant account |
+
+### Important product truth
+
+“只填支付宝账号就能收款”在**官方开放接口**下对应的是：
+
+- 配置 **支付宝开放平台应用**（`app_id` + RSA2 密钥）
+- 到账账户 = 该应用绑定的**商户结算户**
+- 可选展示字段 `settle_account_label`（支付宝登录号）仅作运维提示
+
+**不是**任意个人支付宝手机号即可走稳定官方 API。个人码监控等灰产方案不进 MVP。
 
 ---
 
-## 2. High-level components
+## 2. Stack (locked)
+
+| Layer | Choice |
+| --- | --- |
+| Runtime | Node.js 20+ / TypeScript |
+| HTTP | Fastify |
+| DB access | Drizzle ORM |
+| DB MVP | SQLite |
+| DB prod path | MySQL 8 |
+| Admin UI | Vue 3 + Vite + Naive UI (or Element Plus) |
+| Notify retry | DB-backed attempts (Redis optional later) |
+| Package manager | pnpm |
+| Deploy | Docker Compose and/or PM2 + reverse proxy (TLS) |
+
+---
+
+## 3. Repo layout
 
 ```text
-                    ┌──────────────────┐
-   newapi / browser │  Merchant API    │  YiPay classic + /api/v1/*
-                    │  (sign verify)   │
-                    └────────┬─────────┘
-                             │
-                    ┌────────▼─────────┐
-                    │  Order Service   │  create / query / expire / paid
-                    └────────┬─────────┘
-                             │
-              ┌──────────────┼──────────────┐
-              ▼              ▼              ▼
-      ┌────────────┐  ┌────────────┐  ┌────────────┐
-      │ Alipay     │  │ WeChat     │  │ Manual/QR  │
-      │ Adapter    │  │ Adapter    │  │ (optional) │
-      └─────┬──────┘  └─────┬──────┘  └────────────┘
-            │ notify        │ notify
-            └───────┬───────┘
-                    ▼
-            ┌───────────────┐
-            │ Notify Worker │  signed callback → merchant notify_url
-            └───────────────┘
-
-   Admin browser ──► Admin API ──► same DB (channels, orders, keys, logs)
+HuaJian_Pay/
+  AGENTS.md
+  README.md
+  task_plan.md
+  findings.md
+  progress.md
+  .env.example
+  docs/
+    architecture.md
+    api.md
+    newapi-integration.md   # later
+    ux/                     # Designer
+  apps/
+    server/                 # PayCore
+    admin/                  # AdminUI
+  packages/
+    shared/                 # optional sign helpers / types
+  scripts/
+  docker-compose.yml        # later
 ```
 
-| Component | Owner | Responsibility |
-| --- | --- | --- |
-| Merchant HTTP API | PayCore | Create/query orders, classic epay paths, sign verify |
-| Order service | PayCore | Lifecycle, idempotency, amount integrity |
-| Channel adapters | PayCore | Alipay RSA2, WeChat APIv3 (later) |
-| Channel notify ingress | PayCore | Verify channel callbacks, mark paid |
-| Merchant notify worker | PayCore | Retry signed POSTs until `success` |
-| Admin API | PayCore | Auth, CRUD channels/keys/settings, order/logs read |
-| Admin web | AdminUI | Console UX |
-| UX system | Designer | Flows / tokens under `docs/ux/` |
-| Planning truth | Planner | This file + plan/findings/progress |
-
 ---
 
-## 3. Request flows
-
-### 3.1 Create order + pay (happy path)
-
-1. newapi signs request with merchant `key`, calls `submit` / `mapi` / `/api/v1/pay/create`.
-2. Platform verifies sign, validates amount/title, inserts order `pending` (unique `pid + out_trade_no`).
-3. Order service selects channel adapter by `type` (`alipay` / `wxpay`).
-4. Adapter creates channel pre-order (e.g. Alipay `trade.precreate`) → QR URL or pay URL.
-5. Response: redirect page, or JSON `{ payurl / qrcode, trade_no }`.
-6. User pays in Alipay/WeChat app.
-7. Channel async notify → verify → set order `paid` (once) → enqueue merchant notify.
-8. Notify worker POSTs YiPay-style form to `notify_url` until body equals `success`.
-
-### 3.2 Query order
-
-- Classic: `/api.php?act=order&pid=&key=&out_trade_no=`
-- Modern: `GET /api/v1/order/query?pid=&out_trade_no=&sign=...`
-- Response includes `status` (`0` unpaid / `1` paid), amounts, channel trade no.
-
-### 3.3 Admin configure Alipay
-
-1. Admin logs in.
-2. Opens Channels → Alipay.
-3. Saves `app_id`, RSA keys, optional settle label.
-4. System stores secrets encrypted-at-rest or restricted DB column; never returns private key in full after save (mask).
-5. Health check endpoint optional: validate key format / app_id presence.
-
----
-
-## 4. Data model sketch
-
-Internal amounts: **integer cents** (`amount_cents`). Edges accept/display decimal `money`.
-
-### 4.1 Tables (MVP)
-
-#### `merchants`
-| Column | Type | Notes |
-| --- | --- | --- |
-| id | PK | |
-| pid | string unique | Public merchant id (e.g. `1000`) |
-| name | string | |
-| api_key_hash | string | Store hash; compare on sign using raw key from secure field **or** store encrypted raw key for sign (YiPay needs raw key for MD5). **Lock:** store encrypted raw `api_key` (AES-GCM with `APP_SECRET`) for sign compatibility; never log. |
-| status | enum | `active` / `disabled` |
-| created_at / updated_at | timestamps | |
-
-#### `admin_users`
-| Column | Type |
-| --- | --- |
-| id | PK |
-| username | unique |
-| password_hash | bcrypt/argon2 |
-| created_at | |
-
-#### `channel_configs`
-| Column | Type | Notes |
-| --- | --- | --- |
-| id | PK | |
-| channel | enum | `alipay` / `wxpay` |
-| enabled | bool | |
-| config_json | encrypted text | app_id, keys, serial, etc. |
-| settle_label | string nullable | Display-only receive account hint |
-| updated_at | | |
-
-#### `orders`
-| Column | Type | Notes |
-| --- | --- | --- |
-| id | PK | |
-| trade_no | string unique | Platform order no |
-| merchant_id | FK | |
-| out_trade_no | string | Unique with merchant_id |
-| channel | enum | |
-| name | string | |
-| amount_cents | int | |
-| status | enum | `pending` / `paid` / `expired` / `closed` |
-| notify_url | string | |
-| return_url | string nullable | |
-| param | string nullable | |
-| channel_trade_no | string nullable | Alipay/WeChat trade no |
-| paid_at | timestamp nullable | |
-| expire_at | timestamp nullable | |
-| client_ip | string nullable | |
-| created_at / updated_at | | |
-
-**Unique index:** `(merchant_id, out_trade_no)`.
-
-#### `notify_attempts`
-| Column | Type | Notes |
-| --- | --- | --- |
-| id | PK | |
-| order_id | FK | |
-| attempt_no | int | |
-| request_url | string | |
-| request_body | text | |
-| response_body | text nullable | |
-| http_status | int nullable | |
-| success | bool | true if body trim == `success` |
-| next_retry_at | timestamp nullable | |
-| created_at | | |
-
-#### `channel_notify_logs`
-| Column | Type | Notes |
-| --- | --- | --- |
-| id | PK | |
-| channel | enum | |
-| order_id | FK nullable | |
-| headers / body | text | Redact secrets |
-| verify_ok | bool | |
-| created_at | | |
-
-#### `audit_logs` (optional MVP+)
-Admin mutations: who/what/when.
-
----
-
-## 5. Module split (apps)
+## 4. Components
 
 ```text
-apps/server/
-  src/
-    main.ts
-    config/env.ts
-    db/
-      schema.ts
-      migrate.ts
-    modules/
-      merchant-api/     # sign, submit, mapi, query
-      orders/
-      channels/
-        types.ts        # ChannelAdapter interface
-        alipay.ts
-        wechat.ts       # stub until enabled
-      notify/
-      admin-api/
-      auth/
-    workers/
-      notify-worker.ts
-      expire-worker.ts  # optional
-
-apps/admin/
-  src/
-    pages/
-      Login
-      Dashboard
-      Channels
-      Orders
-      NotifyLogs
-      ApiKeys / Merchants
-      Settings
+                    ┌─────────────┐
+   newapi / browser │  Merchant   │
+                    └──────┬──────┘
+           YiPay sign      │
+                    ┌──────▼──────┐
+                    │  HTTP API   │  Fastify
+                    │ submit/mapi │
+                    │ query/admin │
+                    └──────┬──────┘
+                           │
+              ┌────────────┼────────────┐
+              ▼            ▼            ▼
+         OrderService  ChannelHub   NotifyWorker
+              │            │            │
+              │     ┌──────┴──────┐     │
+              │     ▼             ▼     │
+              │  AlipayAdapter  WeChat  │
+              │  (P0)         (later)   │
+              │            │            │
+              └────────────┼────────────┘
+                           ▼
+                     SQLite / MySQL
 ```
 
-### ChannelAdapter interface (sketch)
+1. **HTTP API** — YiPay classic paths + `/api/v1/*`, admin REST  
+2. **Order service** — create, pay URL/QR, expire, paid, idempotency  
+3. **Channel adapters** — Alipay RSA2 notify; WeChat APIv3 later  
+4. **Notify worker** — signed callbacks to merchant `notify_url`, retry  
+5. **Admin API + Vue console** — channels, orders, logs, keys  
+6. **Storage** — merchants, orders, channels, notify_attempts  
 
-```ts
-interface ChannelAdapter {
-  readonly type: 'alipay' | 'wxpay';
-  createPayment(order: Order): Promise<{ payUrl?: string; qrCode?: string; raw?: unknown }>;
-  parseAndVerifyNotify(req: IncomingNotify): Promise<NotifyResult>;
-  queryChannelOrder?(order: Order): Promise<ChannelQueryResult>;
-}
+---
+
+## 5. Data model (sketch)
+
+### merchants
+- `id`, `pid` (public merchant id), `name`
+- `api_key` (secret, hashed or encrypted at rest preferred)
+- `status`, `created_at`
+
+### channel_configs
+- `id`, `merchant_id` (or platform-global for single-tenant MVP)
+- `channel` (`alipay` | `wxpay`)
+- `config_json` / encrypted fields: app_id, keys, settle_account_label, …
+- `enabled`
+
+### orders
+- `id`, `trade_no` (platform), `out_trade_no` (merchant)
+- `merchant_id`, `channel`, `name`, `amount_cents` (integer)
+- `status` (`pending` | `paid` | `expired` | `closed`)
+- `channel_trade_no`, `paid_at`, `notify_status`
+- `notify_url`, `return_url`, `param`
+- unique `(merchant_id, out_trade_no)`
+
+### notify_attempts
+- `id`, `order_id`, `attempt_no`, `http_status`, `response_body`, `next_retry_at`, `created_at`
+
+### admin_users
+- `id`, `username`, `password_hash`, `role`
+
+**Money:** store **integer cents** internally; decimal strings only at API edges.
+
+---
+
+## 6. Order lifecycle
+
+```text
+create (signed) → pending
+    → channel pay (QR / redirect)
+    → channel async notify (verified) → paid (once)
+    → enqueue merchant notify → notify_ok | notify_retrying
+expire job: pending past TTL → expired
 ```
 
----
-
-## 6. Environment & deploy
-
-Use `.env.example` as source of truth. Critical vars:
-
-| Group | Vars |
-| --- | --- |
-| App | `APP_NAME`, `APP_ENV`, `APP_URL`, `APP_SECRET` |
-| DB | `DB_DRIVER=sqlite|mysql`, DSN / host credentials |
-| Admin bootstrap | `ADMIN_USERNAME`, `ADMIN_PASSWORD` |
-| Alipay | `ALIPAY_*` (or DB-stored via admin UI preferred for multi-channel ops) |
-| WeChat | `WECHAT_*` |
-| Platform merchant defaults | `PLATFORM_PID`, `PLATFORM_KEY` (bootstrap merchant) |
-
-**Deploy modes:**
-
-1. **Dev:** SQLite file `./data/huajian_pay.db`, `pnpm dev` server + admin.
-2. **Prod simple:** Node process (PM2) + reverse proxy TLS + SQLite or MySQL.
-3. **Prod compose:** `server` + `mysql` + optional `admin` static via server or nginx.
-
-**Public URL requirement:** Alipay/WeChat notify and merchant callbacks need a stable HTTPS origin (`APP_URL`).
+Rules:
+- Paid transitions only forward once (idempotent).
+- Channel notify must verify signature, `out_trade_no`, amount, success status.
+- Merchant notify body success token: plain `success`.
 
 ---
 
-## 7. Security architecture
+## 7. Security baseline
 
-| Control | Implementation |
-| --- | --- |
-| Merchant request auth | YiPay MD5 sign (lowercase), reject on mismatch |
-| Channel callbacks | Official signature verify + amount match + order state machine |
-| Idempotent pay | Conditional update `status=pending → paid` only once |
-| Key storage | Encrypt channel secrets with `APP_SECRET`; mask in admin API |
-| Admin auth | Session cookie (httpOnly, secure in prod) + password hash |
-| Transport | HTTPS in production |
-| Logging | No private keys / full secrets; redact notify bodies if needed |
-| CSRF | SameSite cookies for admin; merchant API is signed not cookie-based |
+1. Merchant request: YiPay MD5 sign (pluggable); reject bad sign.  
+2. Channel notify: Alipay RSA2 / WeChat APIv3.  
+3. Idempotent paid; unique merchant order no.  
+4. Persistent notify retries with cap.  
+5. Secrets in env / encrypted fields; never log private keys.  
+6. Admin auth on all mutations; rate-limit login.  
+7. HTTPS in production for notify URLs.  
 
 ---
 
-## 8. Compatibility matrix
+## 8. Env (see `.env.example`)
 
-| Client need | Support |
-| --- | --- |
-| newapi 易支付插件 base URL | Yes — document base + `pid`/`key` |
-| `type=alipay` | MVP |
-| `type=wxpay` | Phase 2 (interface in MVP) |
-| Response `success` on notify | Yes |
-| MD5 sign | Yes (default) |
-| RSA merchant sign | Deferred |
+- `APP_URL`, `APP_SECRET`
+- `DB_DRIVER` / `DB_DSN`
+- `ADMIN_USERNAME` / `ADMIN_PASSWORD`
+- Alipay: `ALIPAY_APP_ID`, keys, notify/return
+- WeChat: mch/app/v3 key/certs (later)
+- Platform merchant defaults: `PLATFORM_PID`, `PLATFORM_KEY`
 
 ---
 
-## 9. Phased delivery (engineering)
+## 9. Implementation order (PayCore)
 
-| Phase | Tag hint | Scope |
-| --- | --- | --- |
-| Scaffold | `v0.1.0` | Done |
-| Plan lock | `v0.1.1` docs | This architecture + findings |
-| Server skeleton | | DB schema, merchant sign, empty adapters |
-| Alipay MVP | `v0.2.0` | precreate + notify + merchant notify |
-| Admin console | | Channels, orders, logs, keys |
-| WeChat | `v0.3.0` | If credentials ready |
-| Hardening + newapi guide | `v1.0.0` | E2E, rate limits, docs |
+1. Repo apps scaffold (`apps/server`) + DB schema + migrate  
+2. YiPay sign util + create order + query  
+3. Classic routes `/submit.php`, `/mapi.php`, `/api.php` + REST aliases  
+4. Alipay precreate + notify verify + paid  
+5. Notify worker → merchant  
+6. Admin auth + channel config + order list APIs  
+7. WeChat adapter stub / feature flag  
 
 ---
 
-## 10. Open items (do not block Alipay MVP)
+## 10. Residual risks
 
-1. Exact newapi plugin field labels (document after first E2E).
-2. Cert mode Alipay vs public-key mode (start public-key RSA2).
-3. Redis for notify queue (only if DB worker insufficient).
-4. Multi-merchant SaaS packaging.
-
----
-
-## 11. Handoff notes
-
-- **PayCore:** implement from this doc + `docs/api.md`; Alipay first; no personal-bot collection in MVP.
-- **AdminUI:** wire screens to Admin API; Chinese labels OK; mask secrets.
-- **Designer:** prioritize “configure Alipay merchant app → test receive → order/notify failure” flows.
-- **Lead:** unblock PayCore after this plan is pushed; coordinate tags.
+See `findings.md` §7. Main product risk: user expectation of pure personal Alipay without merchant app — mitigated by console copy + docs.
