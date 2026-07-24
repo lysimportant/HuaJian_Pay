@@ -1,0 +1,44 @@
+# Git / IDE
+.git
+.github
+.idea
+.vscode
+*.md
+!README.md
+
+# Secrets — never bake into image
+.env
+.env.*
+!.env.example
+**/*.pem
+**/*.key
+
+# Dependencies & build outputs (rebuilt in image)
+node_modules
+**/node_modules
+**/dist
+**/.vite
+**/.turbo
+**/coverage
+**/*.tsbuildinfo
+
+# Runtime / local data
+data
+*.db
+*.db-*
+.tmp
+.tmp*
+tmp
+
+# Admin accidental emit
+apps/admin/src/**/*.js
+apps/admin/src/**/*.js.map
+
+# Tests / scripts not needed for image runtime
+scripts
+docs
+packages
+
+# OS junk
+.DS_Store
+Thumbs.db

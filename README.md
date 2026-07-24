@@ -30,15 +30,23 @@ https://github.com/lysimportant/HuaJian_Pay.git
 - `docs/structure.md` — repository structure map
 - `docs/architecture.md` — system architecture
 - `docs/api.md` — merchant / admin API sketch
-- `docs/deployment.md` — run & deploy notes
+- `docs/deployment.md` — run & deploy (SQLite volume Docker; **MySQL not implemented**)
 - `docs/newapi-integration.md` — newapi integration
 - `docs/planning/` — task plan, findings, progress
 - `docs/ux/` — flows, IA, visual system, reviews
 - `docs/briefs/` — Lead task briefs
 
+## Containers (skeleton)
+
+- `Dockerfile` — multi-stage (`@huajian/server` runtime + `admin-dist` artifact)
+- `docker-compose.yml` — API + named volume `/data` for SQLite; optional profile `admin-ui`
+- `.dockerignore` — excludes `.env`, keys, `data/`, local `node_modules`
+- `deploy/nginx-admin.conf` — optional Admin SPA + `/admin/api` reverse proxy
+- See `docs/deployment.md` for env injection and Admin dual-path (CDN / nginx sidecar)
+
 ## Layout (summary)
 
-Root holds only monorepo entry files + `AGENTS.md` / `README.md`. Runtime code lives under `apps/`; docs under `docs/`; scripts under `scripts/`; local DB under `data/` (gitignored); temps under `.tmp/<task-id>/`.
+Root holds only monorepo entry files + `AGENTS.md` / `README.md` (+ container tooling). Runtime code under `apps/`; docs under `docs/`; scripts under `scripts/`; local DB under `data/` (gitignored); temps under `.tmp/<task-id>/`.
 
 ## License
 

@@ -1,246 +1,163 @@
-# HuaJian_Pay — Production Deployment & Operations Plan
+# HuaJian_Pay — 部署与运维
 
-> **Verified against git HEAD package manifests (authoritative):**
-> - root `package.json` scripts only: `dev`, `build`, `start`, `typecheck`, `test:mock-e2e`
-> - `@huajian/server` scripts: `dev`, `build`, `start`, `typecheck`
-> - `@huajian/admin` scripts: `dev`, `build`, `typecheck`, `preview` (via `pnpm --filter @huajian/admin …`)
-> - `.env.example`: **`PORT=8080`**, `HOST=0.0.0.0`, SQLite default, `CHANNEL_MODE=mock|alipay`
->
-> **Docker / MySQL production stack below is a recommended target only — not implemented** (no `Dockerfile`, no `docker-compose.yml` in repo).
+> **权威来源：** 根目录 `package.json`、`.env.example`、`Dockerfile`、`docker-compose.yml`。  
+> **数据库现状：** 生产路径为 **SQLite + volume**。`.env.example` 中 MySQL 块仅为未来模板 — **MySQL 未实现，不可宣称已支持。**
 
 ---
 
-## 1. Implementation status
+## 1. 实现状态
 
-| Capability | Status | Notes |
+| 能力 | 状态 | 说明 |
 | --- | --- | --- |
-| pnpm monorepo | ✅ | `pnpm-workspace.yaml`; packages under `apps/*` |
-| HTTP API (`@huajian/server`) | ✅ | Fastify; default **`PORT=8080`**, `HOST=0.0.0.0` |
-| SQLite | ✅ | `DB_DRIVER=sqlite`, `DB_DSN=./data/huajian_pay.db` |
-| Admin SPA (`@huajian/admin`) | ✅ code | Vue/Vite app; **not** wired as a root script |
-| Mock channel + E2E | ✅ | `CHANNEL_MODE=mock`; `pnpm test:mock-e2e` self-starts server, waits `/health`, full flow, kills child |
-| Alipay env slots | ✅ partial | Fill keys; set `CHANNEL_MODE=alipay` |
-| MySQL | ⚠️ template | Commented block in `.env.example` only — **not production-ready** |
-| Docker / Compose | ❌ **not implemented** | See §6 recommendations only |
-| Root `dev:admin` / `dev:server` / `lint` | ❌ **do not exist** | Use commands in §3 only |
+| pnpm monorepo | ✅ | `apps/server`、`apps/admin` |
+| HTTP API | ✅ | Fastify，默认 **`PORT=8080`** |
+| SQLite | ✅ | `DB_DRIVER=sqlite`，容器内默认 `DB_DSN=/data/huajian_pay.db` |
+| Admin SPA | ✅ 代码 | Vite/Vue；**API 进程不托管静态资源** |
+| Mock E2E | ✅ | `pnpm test:mock-e2e` 自启服务 |
+| Alipay 环境位 | ✅ 部分 | `CHANNEL_MODE=alipay` + 密钥 |
+| Docker 多阶段镜像 | ✅ 骨架 | 根目录 `Dockerfile` + `.dockerignore` |
+| Compose（SQLite volume） | ✅ 骨架 | `docker-compose.yml` |
+| MySQL | ❌ 未实现 | 仅 `.env.example` 注释模板 |
+| Admin 与 API 同端口静态托管 | ❌ 未实现 | 见 §5 双路径方案 |
 
 ---
 
-## 2. Repo layout (ops-relevant)
-
-```text
-HuaJian_Pay/
-  package.json              # root scripts (source of truth)
-  pnpm-workspace.yaml
-  .env.example              # copy → .env (never commit secrets)
-  apps/server/              # API + pay + admin API
-  apps/admin/               # Admin SPA (separate package scripts)
-  scripts/mock-e2e.mjs
-  docs/
-  data/                     # default SQLite location
-```
-
-Local API base: `http://localhost:8080` (`APP_URL` / `PORT` in `.env.example`).
-
----
-
-## 3. Commands that actually exist
-
-### 3.1 Root `package.json` (only these)
-
-| Command | Expands to | Purpose |
-| --- | --- | --- |
-| `pnpm dev` | `pnpm --filter @huajian/server dev` | API dev (`tsx watch src/index.ts`) |
-| `pnpm build` | `pnpm --filter @huajian/server build` | Compile server (`tsc` → `dist/`) |
-| `pnpm start` | `pnpm --filter @huajian/server start` | Run `node dist/index.js` on **PORT** (default **8080**) |
-| `pnpm typecheck` | `pnpm --filter @huajian/server typecheck` | Server `tsc --noEmit` |
-| `pnpm test:mock-e2e` | `node scripts/mock-e2e.mjs` | Self-contained mock E2E |
-
-**There are no root scripts named** `dev:server`, `dev:admin`, `lint`, `start:prod`, `docker:up`, or concurrent “dev both apps”.
-
-### 3.2 Server package (`@huajian/server`)
-
-| Command | Purpose |
-| --- | --- |
-| `pnpm --filter @huajian/server dev` | same as root `pnpm dev` |
-| `pnpm --filter @huajian/server build` | `tsc -p tsconfig.json` |
-| `pnpm --filter @huajian/server start` | `node dist/index.js` |
-| `pnpm --filter @huajian/server typecheck` | `tsc --noEmit` |
-
-### 3.3 Admin package (`@huajian/admin`)
-
-Admin is **not** started by root `pnpm dev`. Use filter:
-
-| Command | Purpose |
-| --- | --- |
-| `pnpm --filter @huajian/admin dev` | Vite dev server |
-| `pnpm --filter @huajian/admin build` | `vue-tsc --noEmit && vite build` |
-| `pnpm --filter @huajian/admin typecheck` | `vue-tsc --noEmit` |
-| `pnpm --filter @huajian/admin preview` | Preview production static build |
-
-### 3.4 Local full-stack (two terminals)
+## 2. 本机 Node（无 Docker）
 
 ```bash
-# Terminal A — API (port 8080 by default)
-pnpm dev
-
-# Terminal B — Admin UI
-pnpm --filter @huajian/admin dev
-```
-
-### 3.5 Production-ish process (implemented path = Node + SQLite)
-
-```bash
-# Repo root HuaJian_Pay/
-cp .env.example .env   # edit secrets; keep PORT=8080 unless reverse-proxied differently
+cp .env.example .env   # 改密钥；PORT=8080
 pnpm install
-pnpm build             # builds @huajian/server only
-pnpm start             # listens HOST/PORT from env (default 0.0.0.0:8080)
+pnpm build             # 仅 @huajian/server
+pnpm start             # node apps/server dist，监听 HOST/PORT
 
-# Optional: production admin assets
+# 可选 Admin
 pnpm --filter @huajian/admin build
-# Serve apps/admin/dist via CDN or reverse proxy (not bundled into root start).
+# 用 CDN / nginx / vite preview 托管 apps/admin/dist
 ```
 
-### 3.6 Smoke / regression
+根脚本（仅这些）：`dev` `build` `start` `typecheck` `test:mock-e2e`。  
+Admin：`pnpm --filter @huajian/admin dev|build|preview`。
+
+冒烟：
 
 ```bash
 pnpm test:mock-e2e
-# Expect: PASS mock e2e (exit 0).
-# Script spawns CHANNEL_MODE=mock server, waits GET /health, runs login/order/query/mock-paid/notify, kills child.
-# Does not require a pre-running server.
-```
-
-### 3.7 Pre-release checks (recommended)
-
-```bash
-pnpm typecheck
-pnpm --filter @huajian/admin typecheck
-pnpm build
-pnpm --filter @huajian/admin build
-pnpm test:mock-e2e
+curl -sS http://127.0.0.1:8080/health
 ```
 
 ---
 
-## 4. Environment (`.env.example`)
+## 3. 环境变量（运行时注入）
 
-Copy `.env.example` → `.env`. **Never commit real secrets.**
-
-| Variable | Example / default | Notes |
+| 变量 | 容器建议 | 说明 |
 | --- | --- | --- |
-| `APP_NAME` | `HuaJian_Pay` | Display |
-| `APP_ENV` | `local` / `production` | Label |
-| `APP_URL` | `http://localhost:8080` | Public base URL |
-| `APP_SECRET` | long random | Required in prod |
-| `HOST` | `0.0.0.0` | Bind |
-| **`PORT`** | **`8080`** | **HTTP listen port (not 3000)** |
-| `CHANNEL_MODE` | `mock` \| `alipay` | Channel adapter |
-| `DB_DRIVER` | `sqlite` | Implemented default |
-| `DB_DSN` | `./data/huajian_pay.db` | SQLite path |
-| `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASS` | commented | MySQL **template only** |
-| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | bootstrap | Change in prod |
-| `ALIPAY_*` | empty in example | Required when `CHANNEL_MODE=alipay` |
-| `WECHAT_*` | empty | Optional / future |
-| `PLATFORM_PID` / `PLATFORM_KEY` | YiPay-compatible defaults | Merchant platform key |
+| `APP_ENV` | `production` | |
+| `APP_URL` | 公网 HTTPS 基址 | 回调 URL 依赖 |
+| `APP_SECRET` | 强随机 | **勿写入镜像** |
+| `HOST` / `PORT` | `0.0.0.0` / `8080` | |
+| `DB_DRIVER` | `sqlite` | 当前唯一实现 |
+| `DB_DSN` | `/data/huajian_pay.db` | 与 volume 对齐 |
+| `CHANNEL_MODE` | `mock` 或 `alipay` | 生产勿长期 mock |
+| `ADMIN_*` / `PLATFORM_*` | 强密码 | 运行时注入 |
+| `ALIPAY_*` | 按需 | 运行时注入 |
+
+**禁止**把 `.env`、私钥、`*.pem` 打进镜像（见 `.dockerignore`）。
 
 ---
 
-## 5. Reverse proxy (template — not shipped in repo)
+## 4. Docker 多阶段构建（API）
 
-Terminate TLS in front of Node on **8080**.
+文件：
+
+- `Dockerfile` — deps → build(server+admin) → runtime(API)
+- `.dockerignore` — 排除 `.env`、`node_modules`、`data`、docs 等
+- `docker-compose.yml` — `api` + 可选 `admin-static`（profile `admin-ui`）
+- `deploy/nginx-admin.conf` — Admin SPA + `/admin/api` 反代
+
+### 4.1 构建镜像
+
+```bash
+docker build -t huajian-pay-api:local .
+# 或
+docker compose build
+```
+
+### 4.2 运行（SQLite volume）
+
+```bash
+# 至少设置强密钥（示例）
+export APP_SECRET='replace-me'
+export ADMIN_PASSWORD='replace-me'
+export PLATFORM_KEY='replace-me'
+export APP_URL='https://pay.example.com'
+
+docker compose up -d
+curl -sS http://127.0.0.1:8080/health
+```
+
+数据卷：`huajian_pay_data` → 容器 `/data`，`DB_DSN=/data/huajian_pay.db`。
+
+停止/备份：
+
+```bash
+docker compose down
+# 备份 named volume 或导出 /data/huajian_pay.db
+```
+
+### 4.3 可选 Admin UI sidecar
+
+API **不会** `express.static` 托管 Admin。最小可靠方案：
+
+1. **推荐生产：** 将 `apps/admin/dist` 发布到对象存储/CDN；浏览器 `VITE`/`axios` base 指向公网 API。  
+2. **Compose 侧车：** 先 `pnpm --filter @huajian/admin build`，再：
+
+```bash
+docker compose --profile admin-ui up -d
+# Admin: http://127.0.0.1:8081  （反代 /admin/api → api:8080）
+```
+
+镜像内将 Admin 构建产物放在 **`/app/admin-dist`**（API 进程不托管）。默认 compose 侧车挂载的是宿主机 **`./apps/admin/dist`**；也可从镜像 `docker create` + `docker cp` 抽出 `admin-dist`。
+
+---
+
+## 5. 反向代理（TLS 终止）
 
 ```nginx
-server {
-  listen 443 ssl http2;
-  server_name pay.example.com;
-
-  location / {
-    proxy_pass http://127.0.0.1:8080;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-  }
+location / {
+  proxy_pass http://127.0.0.1:8080;
+  proxy_set_header Host $host;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Real-IP $remote_addr;
 }
 ```
 
-Set `APP_URL=https://pay.example.com` and payment notify/return URLs to the public HTTPS origin.
+`APP_URL` 与支付 notify/return 必须为公网 HTTPS。
 
 ---
 
-## 6. Docker / MySQL — recommended only (**NOT implemented**)
+## 6. MySQL（明确未实现）
 
-Do **not** document or run fictional root scripts. When Docker is added later, introduce real `Dockerfile` / `docker-compose.yml` and update this section.
-
-Illustrative target (not in git today):
-
-```yaml
-# ILLUSTRATIVE ONLY — unimplemented
-services:
-  app:
-    # build: .
-    # ports: ["8080:8080"]
-    environment:
-      APP_ENV: production
-      PORT: "8080"
-      DB_DRIVER: mysql
-  mysql:
-    image: mysql:8
-```
-
-Before calling MySQL “supported”: implement driver parity, migrations, healthcheck on `GET /health`, and CI.
+- 驱动与迁移未交付。  
+- **禁止**在运维文档中写「已支持 MySQL」。  
+- 未来若实现：需驱动、迁移、健康检查与 CI，再更新本节与 Compose。
 
 ---
 
-## 7. Operations checklist (current Node + SQLite path)
+## 7. 运维清单
 
-- [ ] `.env` not in git; secrets rotated from example defaults  
-- [ ] `APP_ENV=production`, strong `APP_SECRET` / `PLATFORM_KEY` / `ADMIN_PASSWORD`  
-- [ ] `APP_URL` and notify URLs use public **HTTPS**  
-- [ ] `CHANNEL_MODE=mock` only for staging drills  
-- [ ] `pnpm build` + `pnpm start` on release host (port **8080** or proxy→8080)  
-- [ ] `pnpm test:mock-e2e` green on RC  
-- [ ] Process supervisor (systemd / pm2) restarts `pnpm start`  
-- [ ] Backup `data/huajian_pay.db` (or future MySQL dumps)  
-- [ ] Admin static (`pnpm --filter @huajian/admin build`) deployed if UI is required  
-
-### systemd sketch
-
-```ini
-[Unit]
-Description=HuaJian_Pay API
-After=network.target
-
-[Service]
-WorkingDirectory=/opt/HuaJian_Pay
-EnvironmentFile=/opt/HuaJian_Pay/.env
-ExecStart=/usr/bin/pnpm start
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-```
-
-### Health / rollback
-
-- Probe: `GET /health` on the API port (default **8080**).  
-- Rollback: previous git tag → restore DB backup → `pnpm build && pnpm start` → re-run `pnpm test:mock-e2e` in staging.
+- [ ] 密钥仅运行时注入；镜像无 `.env`
+- [ ] SQLite volume 已挂载且可备份
+- [ ] `GET /health` 探针
+- [ ] `CHANNEL_MODE=alipay` 时密钥齐全
+- [ ] Admin 若需要：CDN 或 `admin-ui` profile
+- [ ] RC 上 `pnpm test:mock-e2e` 或等价冒烟
 
 ---
 
-## 8. Security pointer
+## 8. 文档历史
 
-Full threat model / go-live checklist: `docs/security-checklist.md` (follow-on task after this doc is accepted).
-
-Minimum: never log `PLATFORM_KEY` or Alipay private keys; restrict admin exposure; mock channel outside production.
-
----
-
-## 9. Document history
-
-| Date | Change |
+| 日期 | 变更 |
 | --- | --- |
-| 2026-07-25 | First correction pass: port 8080, mock E2E, Docker/MySQL as non-implemented. |
-| 2026-07-25 | **Incremental fix:** removed non-existent root scripts (`dev:admin`, `dev:server`, `lint`, concurrent root `dev`). Documented **only** root scripts from `package.json` and filter commands for `@huajian/admin` / `@huajian/server`. |
+| 2026-07-25 | 首次纠正端口 8080、E2E、Docker/MySQL 未实现 |
+| 2026-07-25 | 去除不存在的根脚本说明 |
+| 2026-07-25 | **FileManager：** 落地 Dockerfile / .dockerignore / compose（SQLite volume）；Admin 侧车；明确 MySQL 未实现 |

@@ -1,0 +1,73 @@
+# HuaJian_Pay — SQLite production-ish stack (API container)
+# MySQL is NOT implemented — do not add a mysql service claiming support.
+#
+# Usage:
+#   docker compose up -d --build
+#   curl http://127.0.0.1:8080/health
+#
+# Secrets: set via environment / .env (Compose loads .env for substitution).
+# Never commit real keys.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: huajian-pay-api:local
+    ports:
+      - "${HOST_PORT:-8080}:8080"
+    environment:
+      APP_NAME: HuaJian_Pay
+      APP_ENV: production
+      APP_URL: ${APP_URL:-http://localhost:8080}
+      APP_SECRET: ${APP_SECRET:-change-me-in-compose}
+      HOST: 0.0.0.0
+      PORT: "8080"
+      CHANNEL_MODE: ${CHANNEL_MODE:-mock}
+      DB_DRIVER: sqlite
+      # Absolute path inside container; matches VOLUME /data
+      DB_DSN: /data/huajian_pay.db
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me}
+      PLATFORM_PID: ${PLATFORM_PID:-1000}
+      PLATFORM_KEY: ${PLATFORM_KEY:-change-me-merchant-key}
+      ALIPAY_APP_ID: ${ALIPAY_APP_ID:-}
+      ALIPAY_PRIVATE_KEY: ${ALIPAY_PRIVATE_KEY:-}
+      ALIPAY_PUBLIC_KEY: ${ALIPAY_PUBLIC_KEY:-}
+      ALIPAY_NOTIFY_URL: ${ALIPAY_NOTIFY_URL:-}
+      ALIPAY_RETURN_URL: ${ALIPAY_RETURN_URL:-}
+      ALIPAY_ACCOUNT: ${ALIPAY_ACCOUNT:-}
+    volumes:
+      # Persist SQLite outside the container filesystem
+      - huajian_pay_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # Optional: serve Admin SPA static files built into the image at /app/apps/admin/dist
+  # API does not mount static admin itself — use this nginx sidecar or any CDN.
+  admin-static:
+    image: nginx:1.27-alpine
+    profiles: ["admin-ui"]
+    ports:
+      - "${ADMIN_HOST_PORT:-8081}:80"
+    volumes:
+      # Bind-mount host-built admin dist for local/dev; for pure image extract use a custom image.
+      - ./apps/admin/dist:/usr/share/nginx/html:ro
+      - ./deploy/nginx-admin.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  huajian_pay_data:

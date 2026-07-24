@@ -11,6 +11,10 @@ HuaJian_Pay/
 ├── pnpm-lock.yaml
 ├── .env.example              # Public env template only
 ├── .gitignore
+├── Dockerfile                # Multi-stage API image (root tooling OK)
+├── docker-compose.yml        # SQLite volume stack (MySQL NOT implemented)
+├── .dockerignore
+├── deploy/                   # nginx-admin.conf etc.
 ├── .github/
 │   └── workflows/            # CI (optional tooling)
 ├── apps/
@@ -34,7 +38,7 @@ HuaJian_Pay/
 
 ## Root policy
 
-Allowed at root: monorepo/tooling entry files, `AGENTS.md`, `README.md`, lockfiles, `.env.example`, `.gitignore`, optional `.github/`.
+Allowed at root: monorepo/tooling entry files, `AGENTS.md`, `README.md`, lockfiles, `.env.example`, `.gitignore`, optional `.github/`, container files (`Dockerfile`, `docker-compose.yml`, `.dockerignore`).
 
 Not allowed at root: planning notes, UX drafts, business source, logs, DBs, build output, agent temp JSON.
 
