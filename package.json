@@ -8,7 +8,8 @@
     "dev": "pnpm --filter @huajian/server dev",
     "build": "pnpm --filter @huajian/server build",
     "start": "pnpm --filter @huajian/server start",
-    "typecheck": "pnpm --filter @huajian/server typecheck"
+    "typecheck": "pnpm --filter @huajian/server typecheck",
+    "test:mock-e2e": "node scripts/mock-e2e.mjs"
   },
   "engines": {
     "node": ">=20"
