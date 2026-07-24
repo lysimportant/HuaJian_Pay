@@ -4,8 +4,10 @@ import {
   findMerchantByPid,
   orderToPublic,
   queryOrderByOutTradeNo,
+  queryOrderByTradeNo,
 } from "../pay/orders.js";
-import { verifyMd5, type SignParams } from "../pay/sign.js";
+import { renderPayPage, escapeHtml } from "../pay/pay-page.js";
+import { centsToMoney, verifyMd5, type SignParams } from "../pay/sign.js";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -30,6 +32,13 @@ function collectParams(req: FastifyRequest): SignParams {
 
 function fail(code: number, msg: string) {
   return { code, msg };
+}
+
+function publicStatus(status: string, expiredAt: number | null): string {
+  if (status === "pending" && expiredAt !== null && expiredAt <= Date.now()) {
+    return "expired";
+  }
+  return status;
 }
 
 async function handleCreate(req: FastifyRequest, mode: "mapi" | "submit") {
@@ -73,16 +82,19 @@ async function handleCreate(req: FastifyRequest, mode: "mapi" | "submit") {
     });
 
     if (mode === "submit") {
-      // Simple HTML pay page for classic page-submit compatibility.
-      const html = `<!doctype html>
-<html><head><meta charset="utf-8"><title>Pay</title></head>
-<body>
-  <h3>${escapeHtml(name)}</h3>
-  <p>金额：${escapeHtml(money)} 元</p>
-  <p>平台单号：${escapeHtml(result.order.tradeNo)}</p>
-  <p><a href="${escapeHtml(result.payurl)}">继续支付</a></p>
-  <p>或使用二维码链接：${escapeHtml(result.qrcode)}</p>
-</body></html>`;
+      const html = renderPayPage({
+        tradeNo: result.order.tradeNo,
+        outTradeNo: result.order.outTradeNo,
+        name: result.order.name,
+        amount: money.includes(".") ? money : centsToMoney(result.order.amountCents),
+        type: result.order.channel,
+        status: publicStatus(result.order.status, result.order.expiredAt),
+        payUrl: result.payurl,
+        qrUrl: result.qrcode || result.payurl,
+        returnUrl: result.order.returnUrl || returnUrl || "",
+        expiredAt: result.order.expiredAt,
+        paidAt: result.order.paidAt,
+      });
       return { __html: html };
     }
 
@@ -97,14 +109,6 @@ async function handleCreate(req: FastifyRequest, mode: "mapi" | "submit") {
     const e = err as { code?: number; message?: string };
     return fail(e.code ?? -1, e.message ?? "create order failed");
   }
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 }
 
 async function handleQuery(req: FastifyRequest) {
@@ -146,12 +150,65 @@ async function handleQuery(req: FastifyRequest) {
   };
 }
 
+async function handlePublicPayPage(
+  req: FastifyRequest<{ Params: { tradeNo: string } }>,
+) {
+  const tradeNo = String(req.params.tradeNo ?? "").trim();
+  if (!/^[A-Za-z0-9_-]{8,64}$/.test(tradeNo)) {
+    return {
+      __html: renderPayPage({
+        tradeNo: tradeNo || "",
+        name: "订单支付",
+        amount: "0.00",
+        type: "alipay",
+        status: "error",
+        errorMessage: "订单号无效",
+        skipPoll: true,
+      }),
+    };
+  }
+
+  const order = await queryOrderByTradeNo(tradeNo);
+  if (!order) {
+    return {
+      __html: renderPayPage({
+        tradeNo,
+        name: "订单支付",
+        amount: "0.00",
+        type: "alipay",
+        status: "error",
+        errorMessage: "订单不存在或已失效",
+        skipPoll: false,
+      }),
+    };
+  }
+
+  const amount = centsToMoney(order.amountCents);
+  const html = renderPayPage({
+    tradeNo: order.tradeNo,
+    outTradeNo: order.outTradeNo,
+    name: order.name,
+    amount,
+    type: order.channel,
+    status: publicStatus(order.status, order.expiredAt),
+    payUrl: order.payUrl ?? "",
+    qrUrl: order.qrCode ?? order.payUrl ?? "",
+    returnUrl: order.returnUrl ?? "",
+    expiredAt: order.expiredAt,
+    paidAt: order.paidAt,
+  });
+  return { __html: html };
+}
+
 export async function payRoutes(app: FastifyInstance): Promise<void> {
   // Classic YiPay-compatible
   app.all("/submit.php", async (req, reply) => {
     const result = await handleCreate(req, "submit");
     if (result && typeof result === "object" && "__html" in result) {
-      return reply.type("text/html; charset=utf-8").send((result as { __html: string }).__html);
+      return reply
+        .type("text/html; charset=utf-8")
+        .header("Cache-Control", "no-store")
+        .send((result as { __html: string }).__html);
     }
     return reply.send(result);
   });
@@ -164,7 +221,10 @@ export async function payRoutes(app: FastifyInstance): Promise<void> {
   app.post("/api/v1/pay/submit", async (req, reply) => {
     const result = await handleCreate(req, "submit");
     if (result && typeof result === "object" && "__html" in result) {
-      return reply.type("text/html; charset=utf-8").send((result as { __html: string }).__html);
+      return reply
+        .type("text/html; charset=utf-8")
+        .header("Cache-Control", "no-store")
+        .send((result as { __html: string }).__html);
     }
     return reply.send(result);
   });
@@ -172,4 +232,30 @@ export async function payRoutes(app: FastifyInstance): Promise<void> {
   app.post("/api/v1/pay/create", async (req) => handleCreate(req, "mapi"));
 
   app.get("/api/v1/order/query", async (req) => handleQuery(req));
+
+  // Public payer page by platform trade_no
+  app.get<{ Params: { tradeNo: string } }>(
+    "/pay/:tradeNo",
+    async (req, reply) => {
+      const result = await handlePublicPayPage(req);
+      return reply
+        .type("text/html; charset=utf-8")
+        .header("Cache-Control", "no-store")
+        .send(result.__html);
+    },
+  );
+
+  app.get<{ Params: { tradeNo: string } }>(
+    "/pay/:tradeNo/result",
+    async (req, reply) => {
+      const result = await handlePublicPayPage(req);
+      return reply
+        .type("text/html; charset=utf-8")
+        .header("Cache-Control", "no-store")
+        .send(result.__html);
+    },
+  );
 }
+
+// re-export escapeHtml for any legacy imports / tests
+export { escapeHtml };
