@@ -37,3 +37,6 @@ Thumbs.db
 .tmp*
 tmp/
 .turbo/
+
+*.tsbuildinfo
+apps/admin/src/*.js
