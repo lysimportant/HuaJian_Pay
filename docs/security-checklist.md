@@ -1,9 +1,11 @@
 # HuaJian_Pay — Payment Security Threat Model & Go-Live Checklist
 
 > **Audience:** operators + developers before production traffic.  
-> **Stack context:** Node 20+ / Fastify / Drizzle / SQLite MVP / YiPay-compatible MD5 merchant API / Alipay channel (WeChat later) / Admin session API.  
-> **Related:** `docs/architecture.md`, `docs/api.md`, `docs/deployment.md`, `.env.example`.  
+> **Stack context:** Node 20+ / Fastify / Drizzle / SQLite MVP / YiPay-compatible MD5 merchant API / Alipay channel (WeChat later) / Admin API.  
+> **Related:** `docs/architecture.md`, `docs/api.md`, `docs/deployment.md`, `.env.example`, `apps/server/src/routes/admin.ts`.  
 > **Default listen port:** **8080** (see deployment doc). Docker/MySQL are **not** assumed implemented.
+>
+> **Legend:** **[Implemented]** = true in current code · **[Target]** = go-live control still missing or partial · do not claim Target items as already shipped.
 
 ---
 
@@ -12,17 +14,18 @@
 | Asset | Sensitivity | Notes |
 | --- | --- | --- |
 | `PLATFORM_KEY` / merchant keys | Critical | MD5 sign material; full order forgery if leaked |
-| `APP_SECRET` | Critical | App crypto / session material |
-| Admin password | Critical | Full config + order visibility |
+| `APP_SECRET` | Critical | HMAC key for admin Bearer tokens (`signToken` / `verifyToken` in `admin.ts`) |
+| Admin password hash | Critical | Bootstrap via `ADMIN_*`; full config + order visibility |
+| Admin Bearer token | Critical | HMAC-SHA256 over payload; **12h** `exp`; presented as `Authorization: Bearer <token>` |
 | Alipay app private key / certs | Critical | Channel fund movement / notify spoof if mis-handled |
 | Order rows (money, status, notify_url) | High | Fraud, refund disputes, SSRF via bad notify_url |
 | SQLite file `DB_DSN` | High | Offline dump = full breach |
 | Mock pay endpoints | High in prod | Must never be reachable with real money mode |
-| Logs / error traces | Medium–High | Must not contain keys or full sign strings |
+| Logs / error traces | Medium–High | Must not contain keys, tokens, or full sign strings |
 
 ---
 
-## 2. Trust boundaries
+## 2. Trust boundaries (current auth model)
 
 ```text
 [newapi / merchant] --YiPay MD5--> [HuaJian_Pay public API :8080]
@@ -31,105 +34,144 @@
                                          v
                                   [Alipay / WeChat]
                                          |
-[Browser admin] --session cookie--> [/admin/api/*]
+[Browser admin SPA]
+   |  POST /admin/api/login → JSON { token }
+   |  stores token client-side (typically localStorage / memory — SPA; not HttpOnly cookie)
+   |  subsequent calls: Authorization: Bearer <HMAC token>
+   v
+[/admin/api/*] --requireAdmin--> verify HMAC + exp (12h) using APP_SECRET
                                          |
                                   [SQLite / future MySQL]
 ```
 
-- **Untrusted:** all merchant params, channel HTTP bodies, admin login inputs, `notify_url` targets.  
-- **Trusted only after verify:** merchant `sign`, Alipay notify signature + amount + out_trade_no, admin session.  
+### Current implementation facts (`apps/server/src/routes/admin.ts`)
+
+| Topic | **[Implemented]** behavior |
+| --- | --- |
+| Login response | JSON body includes `token` (not `Set-Cookie`) |
+| Token format | `base64url(JSON payload).HMAC_SHA256(body, APP_SECRET)` (base64url sig) |
+| Payload | `{ sub, username, role, exp }` with `exp = now + 12h` |
+| API auth | `Authorization: Bearer …` via `getBearer` + `verifyToken` (timing-safe sig compare) |
+| Cookies / SameSite | **Not used** for admin session today |
+
+### Client storage residual risk
+
+- Bearer tokens held in SPA storage (e.g. **localStorage**) are readable by any XSS on the admin origin.  
+- **[Target]** Prefer memory-only token, or hardened cookie session (`HttpOnly` + `Secure` + `SameSite`) + CSRF strategy if moving away from Bearer-in-storage.
+
+- **Untrusted:** merchant params, channel HTTP bodies, admin login inputs, `notify_url` targets, any client-supplied token string until HMAC+exp verify succeeds.  
+- **Trusted only after verify:** merchant `sign`, Alipay notify signature + amount + out_trade_no, admin Bearer after `verifyToken`.  
 - **Never trust:** client-supplied “paid” flags without channel/mock authorization rules.
 
 ---
 
 ## 3. Threat model (STRIDE-style, payment-focused)
 
-| ID | Threat | Example | Impact | Mitigations (required / target) |
+| ID | Threat | Example | Impact | Mitigations |
 | --- | --- | --- | --- | --- |
-| T1 | Spoofed merchant create | Attacker guesses/forges MD5 `sign` | Free orders / junk flood | Strong `PLATFORM_KEY`; reject bad sign; constant-time compare; rate limit create |
-| T2 | Amount tampering | Change `money` after sign or in channel return | Underpay | Sign covers `money`; channel notify amount must match order; refuse mismatch |
-| T3 | Replay | Resubmit old signed create/notify | Duplicate side effects | Idempotent pay mark; unique `out_trade_no` per merchant; notify attempt log |
-| T4 | Fake channel notify | POST forged Alipay notify | False paid → merchant credit | RSA2 verify; app_id check; trade_status allowlist; amount match |
-| T5 | Mock channel abuse | Call mock-paid in production | False paid without money | `CHANNEL_MODE=mock` forbidden in prod; disable mock routes unless mock mode |
-| T6 | Merchant notify SSRF | `notify_url` → internal metadata IP | Cloud credential theft | URL allowlist/block private ranges; timeouts; no redirect follow (or strict) |
-| T7 | Notify brute / spam | Flood merchant or platform | DoS | Backoff retries; cap attempts; circuit break bad hosts |
-| T8 | Admin auth break | Weak password, session fixation | Full takeover | Strong admin password; secure cookies (`Secure`/`HttpOnly`/`SameSite`); lockout |
-| T9 | Key leakage | Keys in git, logs, support tickets | Total compromise | `.env` gitignored; redacted logs; secret manager later |
-| T10 | SQLite theft | Copy `data/*.db` from disk | Data + key material if stored | FS permissions; encrypt disk; backups encrypted |
-| T11 | XSS in admin | Stored order fields into UI | Session theft | Vue escaping; CSP; no `v-html` on untrusted fields |
-| T12 | CSRF on admin | Cross-site state change | Config/key rotate abuse | SameSite cookies + CSRF token on mutations (target) |
-| T13 | Dependency RCE | Malicious npm package | Host compromise | Lockfile; `pnpm audit`; pin versions; minimal prod deps |
-| T14 | TLS strip | HTTP notify/URLs | MITM keys & cookies | HTTPS only public `APP_URL`; HSTS at proxy |
-| T15 | Privilege mix-up | Merchant API hits admin routes | Data leak | Separate route prefixes; auth middleware on all `/admin/api/*` |
+| T1 | Spoofed merchant create | Forge MD5 `sign` | Free orders / junk flood | **[Implemented]** sign verify path · **[Target]** rate limit create; strong key ops |
+| T2 | Amount tampering | Change `money` after sign / in return | Underpay | **[Implemented/partial]** sign covers money; channel notify must match order · **[Target]** exhaustive mismatch tests in CI |
+| T3 | Replay | Resubmit old signed create/notify | Duplicate side effects | **[Implemented/partial]** paid idempotency / unique out_trade_no · **[Target]** notify attempt audit |
+| T4 | Fake channel notify | Forged Alipay notify | False paid | **[Target/partial]** RSA2 verify + app_id + trade_status + amount (enable fully for alipay mode) |
+| T5 | Mock channel abuse | Call mock-paid in production | False paid | **[Target]** refuse mock routes unless `CHANNEL_MODE=mock`; forbid mock in prod env |
+| T6 | Merchant notify SSRF | `notify_url` → link-local / metadata | Cloud credential theft | **[Target]** URL allowlist / block private ranges; timeouts; no open redirects |
+| T7 | Notify flood | Spam merchant or platform | DoS | **[Target]** backoff, max attempts, circuit break |
+| T8 | Admin auth break | Weak password; **stolen Bearer token** (XSS, shared machine, log leak) | Full admin takeover until **exp (12h)** or `APP_SECRET` rotate | **[Implemented]** password verify; HMAC Bearer; 12h exp; timing-safe sig · **[Target]** strong password policy; login lockout; token revocation list; avoid long-lived localStorage; rotate `APP_SECRET` on incident |
+| T9 | Key leakage | Keys/tokens in git, logs, tickets | Total compromise | **[Partial]** `.env.example` only · **[Target]** secret scan CI; redacted logs; never log Bearer |
+| T10 | SQLite theft | Copy `data/*.db` | Data breach | **[Target]** FS perms; disk encryption; encrypted backups |
+| T11 | XSS in admin | Untrusted order fields → script | **Steal Bearer from localStorage** | **[Target]** CSP; no raw HTML bind; Vue default escaping audit |
+| T12 | CSRF on admin mutations | Cross-site browser calls API | **Low for pure Bearer-from-JS pattern** (cookie not auto-sent) · **Risk rises** if auth later moves to cookies without CSRF tokens | **[Implemented]** cookie-less Bearer (no classic cookie CSRF) · **[Target]** if switching to cookies: CSRF token + SameSite; for Bearer: still harden CORS (no `*` + credentials) and XSS (T11) |
+| T13 | Dependency RCE | Malicious npm package | Host compromise | **[Target]** lockfile discipline; `pnpm audit`; pin versions |
+| T14 | TLS strip | HTTP admin or notify | Token / key MITM | **[Target]** HTTPS only public `APP_URL`; HSTS at proxy |
+| T15 | Privilege mix-up | Merchant API hits admin routes | Data leak | **[Implemented/partial]** `/admin/api/*` + `requireAdmin` · **[Target]** regression tests that public routes never accept Bearer as merchant auth |
 
 ---
 
-## 4. Control baseline (must for go-live)
+## 4. Control baseline
 
 ### 4.1 Secrets & config
 
-- [ ] No secrets in git history for release branch (scan `APP_SECRET`, `PLATFORM_KEY`, Alipay private key).  
-- [ ] Production `.env` only on host / secret store; mode `0600` (or equivalent).  
-- [ ] `APP_ENV=production`.  
-- [ ] `CHANNEL_MODE=alipay` (or future wechat) — **never `mock`** on internet-facing prod.  
-- [ ] `APP_URL` is public **https://** origin matching reverse proxy.  
-- [ ] `ADMIN_PASSWORD` rotated from example; length ≥ 16; unique.  
-- [ ] `PLATFORM_KEY` high entropy; rotate procedure documented.  
-- [ ] Alipay keys from open platform; notify URL HTTPS and owned domain.
+| Control | Status |
+| --- | --- |
+| No prod secrets in git | **[Target]** enforce with scan |
+| Production `.env` mode `0600` / secret store | **[Target]** ops |
+| `APP_ENV=production` | **[Target]** ops |
+| `CHANNEL_MODE` ≠ `mock` on internet prod | **[Target]** ops + code guard |
+| `APP_URL` public **https://** | **[Target]** ops |
+| Rotate `ADMIN_PASSWORD` from example; ≥ 16 chars | **[Target]** ops |
+| High-entropy `PLATFORM_KEY` + rotation runbook | **[Target]** ops |
+| Alipay keys + HTTPS notify on owned domain | **[Target]** ops |
+| Protect `APP_SECRET` (forges all admin tokens if leaked) | **[Implemented]** used for HMAC · **[Target]** rotation kills outstanding Bearers |
 
 ### 4.2 Cryptography & payments
 
-- [ ] Merchant MD5: exclude empty/`sign`/`sign_type`; ASCII sort; `md5(string + KEY)` **lowercase**; verify with timing-safe compare.  
-- [ ] `money` normalized as decimal string (e.g. `1.00`) consistently in sign + storage + notify.  
-- [ ] Paid transition **idempotent** (second notify = success, no double credit).  
-- [ ] Channel notify: verify signature **before** any DB paid write.  
-- [ ] Amount and `out_trade_no` / trade_no binding checked against local order.  
-- [ ] Mock paid / mock notify endpoints **disabled** when not `CHANNEL_MODE=mock`.  
-- [ ] Outbound merchant notify signed with same MD5 rules; require body `success`.
+| Control | Status |
+| --- | --- |
+| Merchant MD5 rules (skip empty/sign; sort; `md5(string+KEY)` lower); timing-safe compare | **[Implemented/partial]** verify against `apps/server` pay sign helpers |
+| `money` as consistent decimal string in sign/storage/notify | **[Implemented/partial]** |
+| Paid transition idempotent | **[Implemented/partial]** |
+| Channel notify: verify signature before paid write | **[Target/partial]** alipay path |
+| Amount + out_trade_no bind to local order | **[Implemented/partial]** |
+| Mock paid/notify **disabled** unless `CHANNEL_MODE=mock` | **[Target]** hard gate for prod |
+| Outbound merchant notify MD5; expect `success` | **[Implemented/partial]** |
 
 ### 4.3 HTTP surface
 
-- [ ] Reverse proxy TLS; app may bind `HOST=0.0.0.0` **PORT=8080** only on private interface or localhost behind proxy.  
-- [ ] Security headers at proxy or app: `X-Content-Type-Options`, `Referrer-Policy`, minimal CSP for admin.  
-- [ ] CORS: admin and API not `*` with credentials.  
-- [ ] Request body size limits (proxy + Fastify).  
-- [ ] Rate limit: `/admin/api/login`, `/submit.php`, `/mapi.php`, `/api/v1/pay/*` (target if not yet coded — block go-live until basic limit exists or edge WAF).  
+| Control | Status |
+| --- | --- |
+| TLS at reverse proxy; app on **PORT=8080** private/localhost | **[Target]** ops (`docs/deployment.md`) |
+| Security headers / CSP for admin | **[Target]** |
+| CORS: not `*` with credentialed admin clients | **[Target]** explicit admin origin allowlist |
+| Body size limits | **[Target/partial]** |
+| Rate limit login + pay create endpoints | **[Target]** (or edge WAF before go-live) |
 
-### 4.4 Admin
+### 4.4 Admin auth (**current Bearer model**)
 
-- [ ] All `/admin/api/*` except login require session.  
-- [ ] Session cookie: `HttpOnly`, `Secure` (prod), `SameSite=Lax` or `Strict`.  
-- [ ] Login lockout / delay after N failures.  
-- [ ] No merchant keys returned in full after create (show once + rotate).  
-- [ ] Audit log for channel config changes and key rotation (target).
+| Control | Status |
+| --- | --- |
+| Login issues HMAC Bearer, **12h** `exp` | **[Implemented]** `admin.ts` `signToken` / `exp: Date.now() + 12h` |
+| Protected routes call `requireAdmin` → Bearer required | **[Implemented]** |
+| Timing-safe HMAC compare | **[Implemented]** `timingSafeEqual` on sig |
+| **Session cookies / SameSite / Secure cookie flags** | **Not implemented** — do not checklist as done |
+| SPA stores token (likely **localStorage**) | **[Assumed client]** treat XSS as token theft |
+| Login lockout / progressive delay | **[Target]** |
+| Server-side token revoke / logout denylist | **[Target]** (today: wait exp or rotate `APP_SECRET`) |
+| Mask merchant keys in list APIs | **[Implemented/partial]** `maskKey` |
+| Audit log for channel/key changes | **[Target]** |
+| CSRF cookie pattern | **N/A currently**; re-open if cookies introduced |
 
 ### 4.5 Data & ops
 
-- [ ] DB file permissions; automated encrypted backups; tested restore.  
-- [ ] Log redaction: never log raw `sign`, keys, Authorization, full Alipay private key, passwords.  
-- [ ] Process supervisor restart; disk watch on `data/`.  
-- [ ] Dependency audit before release (`pnpm audit` or equivalent).  
-- [ ] `pnpm test:mock-e2e` green on RC **in staging only** (mock mode).  
+| Control | Status |
+| --- | --- |
+| DB file perms + encrypted backups + restore drill | **[Target]** |
+| Never log passwords, `PLATFORM_KEY`, Alipay private keys, raw `sign`, **Bearer tokens** | **[Target]** log policy |
+| Supervisor restart; disk watch on `data/` | **[Target]** |
+| `pnpm audit` (or equiv.) before release | **[Target]** |
+| Staging: `pnpm test:mock-e2e` green under mock only | **[Implemented]** script path · **[Target]** CI gate |
 
 ### 4.6 newapi integration
 
-- [ ] newapi store uses HTTPS base URL.  
-- [ ] pid/key from admin, not hardcoded in public frontend.  
-- [ ] newapi `notify_url` reachable from HuaJian_Pay egress; HTTPS.  
-- [ ] End-to-end test with **sandbox** Alipay before production keys.
+| Control | Status |
+| --- | --- |
+| HTTPS base URL in newapi store | **[Target]** integrator |
+| pid/key not hardcoded in public frontend | **[Target]** |
+| `notify_url` HTTPS and reachable from platform egress | **[Target]** |
+| Sandbox Alipay E2E before prod keys | **[Target]** |
 
 ---
 
 ## 5. Go-live gate (ordered)
 
-1. **Config freeze:** prod `.env` reviewed by two people if possible.  
-2. **Build:** `pnpm build` (server); optional `pnpm --filter @huajian/admin build`.  
+1. **Config freeze:** prod `.env` reviewed (two-person if possible).  
+2. **Build:** `pnpm build`; optional `pnpm --filter @huajian/admin build`.  
 3. **Staging E2E:** `CHANNEL_MODE=mock` → `pnpm test:mock-e2e` PASS.  
-4. **Staging Alipay sandbox:** real precreate + notify + merchant notify once.  
-5. **Security checklist §4** all **required** boxes checked.  
-6. **Cutover:** point DNS/proxy; `CHANNEL_MODE=alipay`; disable mock.  
-7. **Watch:** error rate, unpaid stuck orders, notify retry queue, disk.  
-8. **Rollback plan:** previous git tag + DB backup restore (see `docs/deployment.md`).
+4. **Staging Alipay sandbox:** precreate + notify + merchant notify once.  
+5. **§4:** all **[Target]** items labeled **required for go-live** closed or risk-accepted in writing.  
+6. **Admin auth check:** confirm production admin UI only sends `Authorization: Bearer`; no accidental token logging; XSS review on admin origin.  
+7. **Cutover:** DNS/proxy; `CHANNEL_MODE=alipay`; mock routes unreachable.  
+8. **Watch:** 401 spikes, unpaid stuck orders, notify retries, disk.  
+9. **Rollback:** previous git tag + DB backup (`docs/deployment.md`).
 
 ---
 
@@ -137,20 +179,24 @@
 
 | Event | Immediate action |
 | --- | --- |
-| Key leak (`PLATFORM_KEY` / Alipay private) | Rotate key; invalidate sessions; re-sign config; audit recent orders |
-| Fake paid orders | Stop channel traffic; invalidate suspect trades; reconcile with Alipay bill |
-| Admin compromise | Disable admin user; rotate `APP_SECRET`/password; review channel keys |
+| `PLATFORM_KEY` / Alipay private leak | Rotate keys; reconfigure merchants/channel; audit recent orders |
+| **Admin Bearer theft** / XSS | Rotate **`APP_SECRET`** (invalidates all HMAC tokens); force password reset; scrub logs; fix XSS; users must re-login |
+| Admin password compromise | Reset password hash; rotate `APP_SECRET` if token also exposed; review channel key views |
+| Fake paid orders | Stop channel traffic; reconcile with Alipay bill; invalidate suspect trades |
 | SSRF / metadata access | Block egress; patch URL validator; rotate cloud creds if any |
+
+> **Note:** There is **no** server-side session store to “clear cookies”. Invalidation = **`APP_SECRET` rotation** and/or waiting out **12h** `exp`, until a revoke list is **[Target]** implemented.
 
 ---
 
 ## 7. Explicit non-goals / residual risk (MVP)
 
-- MD5 YiPay compatibility is **legacy-weak** by modern standards; residual forgery risk if keys are short — mitigate with key length + rate limits, plan HMAC upgrade later.  
-- SQLite single-file not multi-AZ HA.  
-- Docker/MySQL hardening N/A until those deploy paths exist (`docs/deployment.md` §6).  
-- WeChat not go-live until adapter + verify path complete.  
-- Full PCI scope avoided by not storing card data; still protect PII in order `name`/`param`.
+- YiPay **MD5** compatibility is legacy-weak; residual forgery if keys short — long keys + rate limits; plan stronger MAC later.  
+- **Bearer + localStorage** is XSS-equivalent-to-session-theft; cookie `HttpOnly` is **not** a current control.  
+- SQLite not multi-AZ HA.  
+- Docker/MySQL hardening N/A until those paths exist.  
+- WeChat not go-live until adapter + verify complete.  
+- No card data (out of PCI SAQ scope for cards); still protect order PII fields.
 
 ---
 
@@ -158,4 +204,5 @@
 
 | Date | Change |
 | --- | --- |
-| 2026-07-25 | Initial threat model + go-live checklist after deployment.md correction (`5146976` lineage). |
+| 2026-07-25 | Initial threat model + go-live checklist. |
+| 2026-07-25 | **Accuracy fix:** admin auth = `Authorization: Bearer` HMAC token (12h) per `admin.ts`, not session cookie. T8/T12, trust boundary, admin checklist, incident response rewritten. **[Implemented]** vs **[Target]** labels throughout. |
