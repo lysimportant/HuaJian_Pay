@@ -445,6 +445,158 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
+  // —— WeChat Pay APIv3 Native config (secrets never fully echoed) ——
+  function publicWxpayConfigView(cfg: Record<string, string>) {
+    const apiV3Key = cfg.api_v3_key || env.wechatApiV3Key || "";
+    const privateKey = cfg.private_key || env.wechatPrivateKey || "";
+    const platformKey =
+      cfg.platform_public_key || env.wechatPlatformPublicKey || "";
+    return {
+      mch_id: cfg.mch_id || env.wechatMchId || "",
+      app_id: cfg.app_id || env.wechatAppId || "",
+      serial_no: cfg.serial_no || env.wechatSerialNo || "",
+      notify_url:
+        cfg.notify_url ||
+        env.wechatNotifyUrl ||
+        `${env.appUrl}/channels/wxpay/notify`,
+      api_v3_key: "",
+      private_key: "",
+      platform_public_key: "",
+      has_api_v3_key: Boolean(apiV3Key),
+      has_private_key: Boolean(privateKey),
+      has_platform_public_key: Boolean(platformKey),
+      api_v3_key_hint: apiV3Key ? maskKey(apiV3Key) : "",
+      private_key_hint: privateKey ? maskKey(privateKey) : "",
+      platform_public_key_hint: platformKey ? maskKey(platformKey) : "",
+    };
+  }
+
+  app.get("/admin/api/channels/wxpay", async (req, reply) => {
+    const session = await requireAdmin(req, reply);
+    if (!session) return;
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(channelConfigs)
+      .where(eq(channelConfigs.channel, "wxpay"))
+      .limit(1);
+    const row = rows[0];
+    let cfg: Record<string, string> = {};
+    if (row) {
+      try {
+        cfg = JSON.parse(row.configJson) as Record<string, string>;
+      } catch {
+        cfg = {};
+      }
+    }
+    return {
+      code: 0,
+      channel: "wxpay",
+      enabled: row?.enabled ?? true,
+      mode: env.channelMode,
+      config: publicWxpayConfigView(cfg),
+    };
+  });
+
+  app.put("/admin/api/channels/wxpay", async (req, reply) => {
+    const session = await requireAdmin(req, reply);
+    if (!session) return;
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(channelConfigs)
+      .where(eq(channelConfigs.channel, "wxpay"))
+      .limit(1);
+
+    let current: Record<string, string> = {};
+    if (rows[0]) {
+      try {
+        current = JSON.parse(rows[0].configJson) as Record<string, string>;
+      } catch {
+        current = {};
+      }
+    }
+
+    const pickString = (key: string, fallback: string): string => {
+      if (body[key] === undefined || body[key] === null) return fallback;
+      return String(body[key]).trim();
+    };
+
+    const next = {
+      mch_id: pickString("mch_id", current.mch_id || env.wechatMchId || ""),
+      app_id: pickString("app_id", current.app_id || env.wechatAppId || ""),
+      serial_no: pickString(
+        "serial_no",
+        current.serial_no || env.wechatSerialNo || "",
+      ),
+      notify_url: pickString(
+        "notify_url",
+        current.notify_url ||
+          env.wechatNotifyUrl ||
+          `${env.appUrl}/channels/wxpay/notify`,
+      ),
+      api_v3_key: resolveSecretField(
+        body.api_v3_key,
+        current.api_v3_key,
+        env.wechatApiV3Key || "",
+      ),
+      private_key: resolveSecretField(
+        body.private_key,
+        current.private_key,
+        env.wechatPrivateKey || "",
+      ),
+      platform_public_key: resolveSecretField(
+        body.platform_public_key,
+        current.platform_public_key,
+        env.wechatPlatformPublicKey || "",
+      ),
+    };
+
+    if (next.api_v3_key && next.api_v3_key.length !== 32) {
+      return reply
+        .code(400)
+        .send({ code: 400, msg: "api_v3_key must be exactly 32 characters" });
+    }
+    if (next.notify_url && !/^https?:\/\//i.test(next.notify_url)) {
+      return reply
+        .code(400)
+        .send({ code: 400, msg: "notify_url must be http(s) URL" });
+    }
+
+    const enabled =
+      body.enabled === undefined
+        ? (rows[0]?.enabled ?? true)
+        : Boolean(body.enabled);
+    const now = Date.now();
+    const configJson = JSON.stringify(next);
+
+    if (rows[0]) {
+      await db
+        .update(channelConfigs)
+        .set({ configJson, enabled, updatedAt: now })
+        .where(eq(channelConfigs.id, rows[0].id));
+    } else {
+      await db.insert(channelConfigs).values({
+        merchantId: null,
+        channel: "wxpay",
+        configJson,
+        enabled,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    return {
+      code: 0,
+      msg: "ok",
+      channel: "wxpay",
+      enabled,
+      mode: env.channelMode,
+      config: publicWxpayConfigView(next),
+    };
+  });
+
   app.get("/admin/api/merchants", async (req, reply) => {
     const session = await requireAdmin(req, reply);
     if (!session) return;

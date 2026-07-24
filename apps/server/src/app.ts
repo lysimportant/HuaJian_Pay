@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import { env } from "./config/env.js";
 import { adminRoutes } from "./routes/admin.js";
 import { channelRoutes } from "./routes/channels.js";
+import { wechatChannelRoutes } from "./routes/wechat-channel.js";
 import { healthRoutes } from "./routes/health.js";
 import { payRoutes } from "./routes/pay.js";
 import { publicOrderRoutes } from "./routes/public-order.js";
@@ -35,7 +36,7 @@ export async function buildApp() {
     health: "/health",
     classic: ["/submit.php", "/mapi.php", "/api.php"],
     public: ["/api/v1/public/orders/:tradeNo/status"],
-    channels: ["/channels/alipay/notify"],
+    channels: ["/channels/alipay/notify", "/channels/wxpay/notify"],
     admin: "/admin/api/*",
   }));
 
@@ -43,6 +44,7 @@ export async function buildApp() {
   await app.register(payRoutes);
   await app.register(publicOrderRoutes);
   await app.register(channelRoutes);
+  await app.register(wechatChannelRoutes);
   await app.register(adminRoutes);
 
   return app;

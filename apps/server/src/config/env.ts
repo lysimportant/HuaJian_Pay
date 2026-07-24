@@ -54,7 +54,10 @@ export const env = {
   platformPid: optional("PLATFORM_PID", "1000"),
   platformKey: required("PLATFORM_KEY", "change-me-merchant-key"),
 
-  channelMode: (optional("CHANNEL_MODE", "mock") as "mock" | "alipay"),
+  channelMode: (optional("CHANNEL_MODE", "mock") as
+    | "mock"
+    | "alipay"
+    | "wxpay"),
 
   alipayAppId: optional("ALIPAY_APP_ID"),
   alipayPrivateKey: optional("ALIPAY_PRIVATE_KEY"),
@@ -62,6 +65,19 @@ export const env = {
   alipayNotifyUrl: optional("ALIPAY_NOTIFY_URL"),
   alipayReturnUrl: optional("ALIPAY_RETURN_URL"),
   alipayAccount: optional("ALIPAY_ACCOUNT"),
+
+  /** WeChat Pay merchant APIv3 (Native). Not personal QR monitoring. */
+  wechatMchId: optional("WECHAT_MCH_ID"),
+  wechatAppId: optional("WECHAT_APP_ID"),
+  // Accept both WECHAT_APIV3_KEY and WECHAT_API_V3_KEY
+  wechatApiV3Key:
+    optional("WECHAT_APIV3_KEY") || optional("WECHAT_API_V3_KEY"),
+  wechatSerialNo: optional("WECHAT_SERIAL_NO"),
+  wechatPrivateKey: optional("WECHAT_PRIVATE_KEY"),
+  wechatPlatformPublicKey: optional("WECHAT_PLATFORM_PUBLIC_KEY"),
+  wechatNotifyUrl: optional("WECHAT_NOTIFY_URL"),
+  wechatCertPath: optional("WECHAT_CERT_PATH"),
+  wechatKeyPath: optional("WECHAT_KEY_PATH") || optional("WECHAT_PRIVATE_KEY_PATH"),
 } as const;
 
 export type Env = typeof env;

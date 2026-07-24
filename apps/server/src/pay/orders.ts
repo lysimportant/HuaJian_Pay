@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { and, eq } from "drizzle-orm";
-import { getAlipayChannel } from "../channels/index.js";
+import { getChannel } from "../channels/index.js";
 import { env } from "../config/env.js";
 import { getDb, merchants, orders, type Order } from "../db/index.js";
 import { centsToMoney, moneyToCents } from "./sign.js";
@@ -57,11 +57,6 @@ export async function createOrder(
     throw Object.assign(new Error("unsupported type"), { code: -2 });
   }
 
-  if (input.type === "wxpay") {
-    // Interface reserved; live WeChat is out of scope for Alipay MVP.
-    throw Object.assign(new Error("wxpay not enabled in MVP"), { code: -2 });
-  }
-
   const amountCents = moneyToCents(input.money);
   const tradeNo = generateTradeNo();
   const now = Date.now();
@@ -104,12 +99,18 @@ export async function createOrder(
   }
 
   try {
-    const channel = await getAlipayChannel();
+    const channel = await getChannel(input.type);
+    const notifyUrl =
+      input.type === "wxpay"
+        ? env.wechatNotifyUrl || `${env.appUrl}/channels/wxpay/notify`
+        : env.alipayNotifyUrl || `${env.appUrl}/channels/alipay/notify`;
     const pre = await channel.precreate({
       order,
       subject: input.name,
-      notifyUrl: env.alipayNotifyUrl || `${env.appUrl}/channels/alipay/notify`,
-      returnUrl: input.returnUrl || env.alipayReturnUrl || env.appUrl,
+      notifyUrl,
+      returnUrl:
+        input.returnUrl ||
+        (input.type === "wxpay" ? env.appUrl : env.alipayReturnUrl || env.appUrl),
     });
 
     const updated = await db

@@ -1,52 +1,44 @@
-import { eq } from "drizzle-orm";
-import { env } from "../config/env.js";
-import { channelConfigs, getDb } from "../db/index.js";
-import {
-  AlipayChannel,
-  MockAlipayChannel,
-  type AlipayConfig,
-} from "./alipay.js";
 import type { PaymentChannel } from "./types.js";
+import { AlipayChannel, MockAlipayChannel } from "./alipay.js";
+import {
+  createWechatMockNativeChannel,
+  createWechatNativeChannel,
+} from "./wechat.js";
+import { env } from "../config/env.js";
 
-async function loadAlipayConfigFromDb(): Promise<Partial<AlipayConfig>> {
-  const db = getDb();
-  const rows = await db
-    .select()
-    .from(channelConfigs)
-    .where(eq(channelConfigs.channel, "alipay"))
-    .limit(1);
+/**
+ * Resolve payment channel adapter by product type / CHANNEL_MODE.
+ * - mock: no real network (alipay mock or wxpay mock native)
+ * - real: Alipay RSA2 or WeChat APIv3 Native
+ */
+export async function getChannel(type: string): Promise<PaymentChannel> {
+  const t = (type || "alipay").toLowerCase();
 
-  if (rows.length === 0) return {};
-  try {
-    const raw = JSON.parse(rows[0].configJson) as Record<string, string>;
-    return {
-      appId: raw.app_id || "",
-      privateKey: raw.private_key || "",
-      publicKey: raw.public_key || "",
-      notifyUrl: raw.notify_url || "",
-      returnUrl: raw.return_url || "",
-    };
-  } catch {
-    return {};
-  }
-}
-
-export async function getAlipayChannel(): Promise<PaymentChannel> {
   if (env.channelMode === "mock") {
+    if (t === "wxpay") return createWechatMockNativeChannel();
     return new MockAlipayChannel();
   }
 
-  const fromDb = await loadAlipayConfigFromDb();
-  const cfg: AlipayConfig = {
-    appId: fromDb.appId || env.alipayAppId || "",
-    privateKey: fromDb.privateKey || env.alipayPrivateKey || "",
-    publicKey: fromDb.publicKey || env.alipayPublicKey || "",
-    notifyUrl:
-      fromDb.notifyUrl ||
-      env.alipayNotifyUrl ||
-      `${env.appUrl}/channels/alipay/notify`,
-    returnUrl: fromDb.returnUrl || env.alipayReturnUrl || env.appUrl,
-  };
+  if (t === "wxpay" || env.channelMode === "wxpay") {
+    return createWechatNativeChannel();
+  }
 
-  return new AlipayChannel(cfg);
+  // Default real path remains Alipay (existing behavior).
+  return new AlipayChannel({
+    appId: env.alipayAppId || "",
+    privateKey: env.alipayPrivateKey || "",
+    publicKey: env.alipayPublicKey || "",
+    notifyUrl: env.alipayNotifyUrl || `${env.appUrl}/channels/alipay/notify`,
+    returnUrl: env.alipayReturnUrl || env.appUrl,
+  });
 }
+
+/** @deprecated use getChannel */
+export async function getAlipayChannel(): Promise<PaymentChannel> {
+  return getChannel("alipay");
+}
+
+export * from "./types.js";
+export * from "./alipay.js";
+export * from "./wechat.js";
+export * from "./wechat-api-v3.js";
