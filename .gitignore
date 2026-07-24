@@ -1,0 +1,55 @@
+# env & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# deps & build
+node_modules/
+vendor/
+dist/
+build/
+out/
+.target/
+bin/
+obj/
+*.exe
+*.dll
+coverage/
+.nyc_output/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ide / os
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# logs & temp
+*.log
+logs/
+.tmp/
+tmp/
+.cache/
+.temp/
+
+# local data
+data/*.db
+data/*.sqlite
+*.sqlite3
+
+# aion / agent local
+.aionrs/
+.memory/
