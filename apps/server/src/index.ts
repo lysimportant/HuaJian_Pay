@@ -1,9 +1,11 @@
 import { buildApp } from "./app.js";
 import { env } from "./config/env.js";
 import { initDb } from "./db/index.js";
+import { startNotifyWorker } from "./pay/notify.js";
 
 async function main(): Promise<void> {
   await initDb();
+  startNotifyWorker(5000);
 
   const app = await buildApp();
 
