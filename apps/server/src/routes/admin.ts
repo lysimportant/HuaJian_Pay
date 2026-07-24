@@ -87,6 +87,50 @@ function maskKey(key: string): string {
   return `${key.slice(0, 4)}****${key.slice(-4)}`;
 }
 
+/** True when client did not supply a real secret replacement (keep stored value). */
+function shouldPreserveSecret(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  if (typeof value !== "string") return true;
+  const v = value.trim();
+  if (v === "") return true;
+  // Masked GET echo or accidental paste of redacted form value
+  if (v.includes("****")) return true;
+  return false;
+}
+
+function resolveSecretField(
+  bodyValue: unknown,
+  currentValue: string | undefined,
+  envFallback: string,
+): string {
+  if (shouldPreserveSecret(bodyValue)) {
+    return currentValue || envFallback || "";
+  }
+  return String(bodyValue).trim();
+}
+
+function publicAlipayConfigView(cfg: Record<string, string>) {
+  const privateKey = cfg.private_key || env.alipayPrivateKey || "";
+  const publicKey = cfg.public_key || env.alipayPublicKey || "";
+  return {
+    app_id: cfg.app_id || env.alipayAppId || "",
+    // Never echo secret material (full or masked) into editable secret fields.
+    private_key: "",
+    public_key: "",
+    notify_url:
+      cfg.notify_url ||
+      env.alipayNotifyUrl ||
+      `${env.appUrl}/channels/alipay/notify`,
+    return_url: cfg.return_url || env.alipayReturnUrl || env.appUrl,
+    settle_account_label: cfg.settle_account_label || env.alipayAccount || "",
+    has_private_key: Boolean(privateKey),
+    has_public_key: Boolean(publicKey),
+    // Optional non-secret summary for UI badges only (not a full key).
+    private_key_hint: privateKey ? maskKey(privateKey) : "",
+    public_key_hint: publicKey ? maskKey(publicKey) : "",
+  };
+}
+
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.post("/admin/api/login", async (req, reply) => {
     const body = (req.body ?? {}) as { username?: string; password?: string };
@@ -243,20 +287,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       channel: "alipay",
       enabled: row?.enabled ?? true,
       mode: env.channelMode,
-      config: {
-        app_id: cfg.app_id || env.alipayAppId || "",
-        // never return private key plaintext in full if long — still needed for admin edit; mask if empty only
-        private_key: cfg.private_key ? maskKey(cfg.private_key) : "",
-        public_key: cfg.public_key ? maskKey(cfg.public_key) : "",
-        notify_url:
-          cfg.notify_url ||
-          env.alipayNotifyUrl ||
-          `${env.appUrl}/channels/alipay/notify`,
-        return_url: cfg.return_url || env.alipayReturnUrl || env.appUrl,
-        settle_account_label: cfg.settle_account_label || env.alipayAccount || "",
-        has_private_key: Boolean(cfg.private_key || env.alipayPrivateKey),
-        has_public_key: Boolean(cfg.public_key || env.alipayPublicKey),
-      },
+      config: publicAlipayConfigView(cfg),
     };
   });
 
@@ -280,37 +311,56 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
+    // Non-secret fields: empty string is allowed as explicit clear only for labels/urls if provided;
+    // missing keys keep previous.
+    const pickString = (
+      key: string,
+      fallback: string,
+    ): string => {
+      if (body[key] === undefined || body[key] === null) return fallback;
+      return String(body[key]).trim();
+    };
+
     const next = {
-      app_id: String(body.app_id ?? current.app_id ?? env.alipayAppId ?? ""),
-      private_key: String(
-        body.private_key ?? current.private_key ?? env.alipayPrivateKey ?? "",
+      app_id: pickString("app_id", current.app_id || env.alipayAppId || ""),
+      private_key: resolveSecretField(
+        body.private_key,
+        current.private_key,
+        env.alipayPrivateKey || "",
       ),
-      public_key: String(
-        body.public_key ?? current.public_key ?? env.alipayPublicKey ?? "",
+      public_key: resolveSecretField(
+        body.public_key,
+        current.public_key,
+        env.alipayPublicKey || "",
       ),
-      notify_url: String(
-        body.notify_url ??
-          current.notify_url ??
-          env.alipayNotifyUrl ??
+      notify_url: pickString(
+        "notify_url",
+        current.notify_url ||
+          env.alipayNotifyUrl ||
           `${env.appUrl}/channels/alipay/notify`,
       ),
-      return_url: String(
-        body.return_url ?? current.return_url ?? env.alipayReturnUrl ?? env.appUrl,
+      return_url: pickString(
+        "return_url",
+        current.return_url || env.alipayReturnUrl || env.appUrl,
       ),
-      settle_account_label: String(
-        body.settle_account_label ??
-          current.settle_account_label ??
-          env.alipayAccount ??
-          "",
+      settle_account_label: pickString(
+        "settle_account_label",
+        current.settle_account_label || env.alipayAccount || "",
       ),
     };
 
-    // Ignore masked placeholders on update
-    if (typeof body.private_key === "string" && body.private_key.includes("****")) {
-      next.private_key = current.private_key || env.alipayPrivateKey || "";
+    if (next.app_id && !/^\d{1,32}$/.test(next.app_id)) {
+      return reply
+        .code(400)
+        .send({ code: 400, msg: "app_id must be numeric (1-32 digits)" });
     }
-    if (typeof body.public_key === "string" && body.public_key.includes("****")) {
-      next.public_key = current.public_key || env.alipayPublicKey || "";
+    for (const urlKey of ["notify_url", "return_url"] as const) {
+      const u = next[urlKey];
+      if (u && !/^https?:\/\//i.test(u)) {
+        return reply
+          .code(400)
+          .send({ code: 400, msg: `${urlKey} must be http(s) URL` });
+      }
     }
 
     const enabled =
@@ -334,7 +384,14 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    return { code: 0, msg: "ok" };
+    return {
+      code: 0,
+      msg: "ok",
+      channel: "alipay",
+      enabled,
+      mode: env.channelMode,
+      config: publicAlipayConfigView(next),
+    };
   });
 
   app.get("/admin/api/merchants", async (req, reply) => {
