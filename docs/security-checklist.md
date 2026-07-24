@@ -134,7 +134,7 @@
 | Protected routes call `requireAdmin` → Bearer required | **[Implemented]** |
 | Timing-safe HMAC compare | **[Implemented]** `timingSafeEqual` on sig |
 | **Session cookies / SameSite / Secure cookie flags** | **Not implemented** — do not checklist as done |
-| SPA stores token (likely **localStorage**) | **[Assumed client]** treat XSS as token theft |
+| SPA stores token in **`localStorage`** (`admin_token`) | **[Implemented]** `apps/admin/src/utils/auth.ts` — XSS ⇒ token theft |
 | Login lockout / progressive delay | **[Target]** |
 | Server-side token revoke / logout denylist | **[Target]** (today: wait exp or rotate `APP_SECRET`) |
 | Mask merchant keys in list APIs | **[Implemented/partial]** `maskKey` |
