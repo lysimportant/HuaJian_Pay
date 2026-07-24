@@ -17,6 +17,9 @@
   - `docs/newapi-integration.md` — URL/pid/key/type/sign + mock/real switch
   - `scripts/mock-e2e.mjs` + `pnpm test:mock-e2e` — deterministic mock smoke
 - Next: run mock E2E green, then harden / WeChat if needed
+- **Designer**: produced `docs/ux/admin-implementation-review.md` (updated to reflect current `AlipayView.vue` + MerchantsView key handling)
+- UIPolish visual polish in progress
+- Pending: mock E2E pass, security checklist, production ops
 
 ## 2026-07-24
 - Cloned empty repo to `D:\pay\HuaJian_Pay`
