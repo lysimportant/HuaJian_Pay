@@ -1,6 +1,7 @@
 import Fastify from "fastify";
 import { env } from "./config/env.js";
 import { healthRoutes } from "./routes/health.js";
+import { payRoutes } from "./routes/pay.js";
 
 export async function buildApp() {
   const app = Fastify({
@@ -9,12 +10,31 @@ export async function buildApp() {
     },
   });
 
+  // Support classic form posts (application/x-www-form-urlencoded)
+  app.addContentTypeParser(
+    "application/x-www-form-urlencoded",
+    { parseAs: "string" },
+    (_req, body, done) => {
+      try {
+        const text = typeof body === "string" ? body : body.toString("utf8");
+        const params = new URLSearchParams(text);
+        const obj: Record<string, string> = {};
+        for (const [k, v] of params.entries()) obj[k] = v;
+        done(null, obj);
+      } catch (err) {
+        done(err as Error, undefined);
+      }
+    },
+  );
+
   app.get("/", async () => ({
     name: env.appName,
-    docs: "/health",
+    health: "/health",
+    classic: ["/submit.php", "/mapi.php", "/api.php"],
   }));
 
   await app.register(healthRoutes);
+  await app.register(payRoutes);
 
   return app;
 }
