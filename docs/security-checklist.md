@@ -2,7 +2,7 @@
 
 > **Audience:** operators + developers before production traffic.  
 > **Stack context:** Node 20+ / Fastify / Drizzle / SQLite MVP / YiPay-compatible MD5 merchant API / Alipay channel (WeChat later) / Admin API.  
-> **Related:** `docs/architecture.md`, `docs/api.md`, `docs/deployment.md`, `.env.example`, `apps/server/src/routes/admin.ts`.  
+> **Related:** `docs/architecture.md`, `docs/api.md`, `docs/deployment.md`, `.env.example`, `apps/server/src/routes/admin.ts`, `apps/admin/src/utils/auth.ts`.  
 > **Default listen port:** **8080** (see deployment doc). Docker/MySQL are **not** assumed implemented.
 >
 > **Legend:** **[Implemented]** = true in current code · **[Target]** = go-live control still missing or partial · do not claim Target items as already shipped.
@@ -36,7 +36,7 @@
                                          |
 [Browser admin SPA]
    |  POST /admin/api/login → JSON { token }
-   |  stores token client-side (typically localStorage / memory — SPA; not HttpOnly cookie)
+   |  **[Implemented]** `apps/admin/src/utils/auth.ts`: localStorage key `admin_token`
    |  subsequent calls: Authorization: Bearer <HMAC token>
    v
 [/admin/api/*] --requireAdmin--> verify HMAC + exp (12h) using APP_SECRET
@@ -44,20 +44,21 @@
                                   [SQLite / future MySQL]
 ```
 
-### Current implementation facts (`apps/server/src/routes/admin.ts`)
+### Current implementation facts
 
-| Topic | **[Implemented]** behavior |
-| --- | --- |
-| Login response | JSON body includes `token` (not `Set-Cookie`) |
-| Token format | `base64url(JSON payload).HMAC_SHA256(body, APP_SECRET)` (base64url sig) |
-| Payload | `{ sub, username, role, exp }` with `exp = now + 12h` |
-| API auth | `Authorization: Bearer …` via `getBearer` + `verifyToken` (timing-safe sig compare) |
-| Cookies / SameSite | **Not used** for admin session today |
+| Topic | **[Implemented]** behavior | Source |
+| --- | --- | --- |
+| Login response | JSON body includes `token` (**not** `Set-Cookie`) | `admin.ts` login handler |
+| Token format | `base64url(JSON payload).HMAC_SHA256(body, APP_SECRET)` (base64url sig) | `admin.ts` `signToken` / `verifyToken` |
+| Payload | `{ sub, username, role, exp }` with `exp = now + 12h` | `admin.ts` |
+| API auth | `Authorization: Bearer …` via `getBearer` + `verifyToken` (timing-safe sig compare) | `admin.ts` `requireAdmin` |
+| Client persistence | **`localStorage`** key `admin_token` (`getToken` / `setToken` / `clearToken`) | `apps/admin/src/utils/auth.ts` |
+| Cookies / SameSite / HttpOnly session | **Not implemented** — do not claim as current controls | — |
 
 ### Client storage residual risk
 
-- Bearer tokens held in SPA storage (e.g. **localStorage**) are readable by any XSS on the admin origin.  
-- **[Target]** Prefer memory-only token, or hardened cookie session (`HttpOnly` + `Secure` + `SameSite`) + CSRF strategy if moving away from Bearer-in-storage.
+- **[Implemented risk]** Bearer in **`localStorage`** is readable by any XSS on the admin origin (equivalent to full session theft until `exp` or `APP_SECRET` rotate).  
+- **[Target]** Memory-only token, or hardened cookie session (`HttpOnly` + `Secure` + `SameSite`) + CSRF strategy if leaving Bearer-in-storage.
 
 - **Untrusted:** merchant params, channel HTTP bodies, admin login inputs, `notify_url` targets, any client-supplied token string until HMAC+exp verify succeeds.  
 - **Trusted only after verify:** merchant `sign`, Alipay notify signature + amount + out_trade_no, admin Bearer after `verifyToken`.  
