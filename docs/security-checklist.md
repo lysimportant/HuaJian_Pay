@@ -207,3 +207,4 @@
 | --- | --- |
 | 2026-07-25 | Initial threat model + go-live checklist. |
 | 2026-07-25 | **Accuracy fix:** admin auth = `Authorization: Bearer` HMAC token (12h) per `admin.ts`, not session cookie. T8/T12, trust boundary, admin checklist, incident response rewritten. **[Implemented]** vs **[Target]** labels throughout. |
+| 2026-07-25 | **Task 019f95fe:** cite `apps/admin/src/utils/auth.ts` localStorage `admin_token` as **[Implemented]** client store; remove “assumed” wording; reaffirm no cookie session claims. |
