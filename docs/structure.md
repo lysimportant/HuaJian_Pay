@@ -27,7 +27,8 @@ HuaJian_Pay/
 │   ├── api.md
 │   ├── deployment.md
 │   ├── newapi-integration.md
-│   ├── security-checklist.md # When present
+│   ├── wechat-pay.md         # WeChat APIv3 deploy / certs / wxpay
+│   ├── security-checklist.md
 │   ├── planning/             # task_plan, findings, progress
 │   ├── ux/                   # flows, IA, visual system, reviews
 │   └── briefs/               # Lead task briefs

@@ -14,9 +14,9 @@
 | 支付网关 / API URL | `http://127.0.0.1:8080/` 或 `http://127.0.0.1:8080` | 根地址即可；插件会拼 `/mapi.php`、`/submit.php`、`/api.php` |
 | 商户 ID（pid） | `1000`（默认种子） | 对应 `PLATFORM_PID` / 后台商户 pid |
 | 商户密钥（key） | 与 `PLATFORM_KEY` 一致 | 默认示例为 `change-me-merchant-key`，**生产务必更换** |
-| 支付方式（type） | `alipay` | MVP 已启用支付宝；`wxpay` 暂未开放 |
+| 支付方式（type） | `alipay` 或 `wxpay` | `alipay` 已可用；`wxpay` 依赖微信 APIv3 核心（见 `docs/wechat-pay.md`，实现中） |
 | 签名方式 | `MD5` | `sign_type=MD5`，小写 hex |
-| 设备/通道模式 | 服务端 `CHANNEL_MODE=mock\|alipay` | newapi 侧无需配置；本地联调先用 `mock` |
+| 设备/通道模式 | 服务端 `CHANNEL_MODE`（如 `mock` / `alipay` / 实现后的微信相关值） | newapi 侧无需配置；本地联调先用 `mock` |
 
 ### 推荐 newapi 映射
 
@@ -25,7 +25,7 @@
 | 易支付接口地址 | `{APP_URL}/` |
 | PID | 商户 `pid` |
 | KEY | 商户 `api_key` |
-| 支付类型 | `alipay` |
+| 支付类型 | `alipay` 或 **`wxpay`**（微信 Native；正式商户 + 证书，见 `docs/wechat-pay.md`） |
 | 签名类型 | MD5 |
 
 ---

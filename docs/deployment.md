@@ -15,6 +15,7 @@
 | Admin SPA | ✅ 代码 | Vite/Vue；**API 进程不托管静态资源** |
 | Mock E2E | ✅ | `pnpm test:mock-e2e` 自启服务 |
 | Alipay 环境位 | ✅ 部分 | `CHANNEL_MODE=alipay` + 密钥 |
+| WeChat APIv3 Native | 🚧 代码合入中 | `CHANNEL_MODE=wxpay`；回调 **`/channels/wxpay/notify`**；env 见 `.env.example` / `docs/wechat-pay.md` |
 | Docker 多阶段镜像 | ✅ 骨架 | 根目录 `Dockerfile` + `.dockerignore` |
 | Compose（SQLite volume） | ✅ 骨架 | `docker-compose.yml` |
 | MySQL | ❌ 未实现 | 仅 `.env.example` 注释模板 |

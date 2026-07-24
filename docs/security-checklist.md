@@ -18,6 +18,7 @@
 | Admin password hash | Critical | Bootstrap via `ADMIN_*`; full config + order visibility |
 | Admin Bearer token | Critical | HMAC-SHA256 over payload; **12h** `exp`; presented as `Authorization: Bearer <token>` |
 | Alipay app private key / certs | Critical | Channel fund movement / notify spoof if mis-handled |
+| WeChat APIv3 key / merchant private key / platform public key | Critical | Env `WECHAT_APIV3_KEY` / `WECHAT_PRIVATE_KEY` / Admin JSON secrets; never GET-echo; see `docs/wechat-pay.md` |
 | Order rows (money, status, notify_url) | High | Fraud, refund disputes, SSRF via bad notify_url |
 | SQLite file `DB_DSN` | High | Offline dump = full breach |
 | Mock pay endpoints | High in prod | Must never be reachable with real money mode |

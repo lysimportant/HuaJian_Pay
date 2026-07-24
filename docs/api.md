@@ -80,7 +80,7 @@ Or signed query variant. Return status, money, trade_no, paid flag.
 | Channel | Path | Verify |
 | --- | --- | --- |
 | Alipay | `POST /channels/alipay/notify` | RSA2, amount, out_trade_no, trade_status |
-| WeChat | `POST /channels/wechat/notify` | APIv3 (later) |
+| WeChat | `POST /channels/wxpay/notify` | APIv3 RSA verify + AES-256-GCM decrypt; headers Wechatpay-*; see `docs/wechat-pay.md` |
 
 On success: mark order paid (idempotent), enqueue merchant notify, respond per channel rules.
 
