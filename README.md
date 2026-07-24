@@ -5,7 +5,7 @@ Lightweight **YiPay-style payment collection platform** for **newapi**.
 ## Goal
 
 - Configure **Alipay account / credentials** and receive payments.
-- Optional **WeChat Pay** when the same ‚Äúreceive money‚Äù effect is achievable.
+- Optional **WeChat Pay** when the same ‚Äúreceive money‚Ä?effect is achievable.
 - Merchant API close to common YiPay conventions for easy newapi integration.
 - Simple admin console for channels, orders, and notify logs.
 
@@ -26,8 +26,8 @@ https://github.com/lysimportant/HuaJian_Pay.git
 
 ## Docs
 
-- `AGENTS.md` ‚Äî team / process / rules
-- `docs/` ‚Äî architecture & API (coming next)
+- `AGENTS.md` ‚Ä?team / process / rules
+- `docs/` ‚Ä?architecture & API (coming next)
 
 ## License
 

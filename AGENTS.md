@@ -34,9 +34,12 @@ Build a lightweight **YiPay-compatible payment collection platform** for **newap
 | Name | Role | Owns | Does NOT own |
 | --- | --- | --- | --- |
 | **Aion CLI** | Lead | Task board, sequencing, review, Git release policy, synthesis to user | Day-to-day feature coding |
-| **Planner** | Architecture & planning | `task_plan.md`, `findings.md`, `progress.md`, module split, data model, API sketch, security baseline | Large code dumps |
-| **PayCore** | Payment backend | Server, DB, Alipay/WeChat adapters, sign/notify, orders, reconcile, YiPay-style API | Pixel-perfect UI polish |
-| **AdminUI** | Admin / merchant frontend | Console pages, forms, order lists, channel settings UX wiring | Payment crypto / bank protocol internals |
+| **Planner** | Architecture & planning | `docs/planning/*` plan files, module split, data model, API sketch, security baseline | Large code dumps |
+| **Coder** | Feature / payment coding | Backend+frontend feature implementation, bugfix, tests, adapters | Pure visual design tokens only |
+| **PayCore / E2EFixer** | Payment backend / verification | Server, DB, Alipay/WeChat, sign/notify, mock E2E | Pixel-perfect UI polish |
+| **AdminUI** | Admin / merchant frontend wiring | Console pages, forms, API wiring | Payment crypto internals |
+| **UIPolish** | Visual UI beauty | Visual polish, theme, spacing, hierarchy, component styling to look premium | Backend protocol / DB schema |
+| **FileManager** | Repository file hygiene | Directory structure, moves, `.gitignore`, prevent root clutter, classify files by type | Business feature logic |
 | **Designer** | UX / UI system | Information architecture, flows, visual tokens, component guidance | Production backend logic |
 
 ### Responsibility detail
@@ -44,14 +47,18 @@ Build a lightweight **YiPay-compatible payment collection platform** for **newap
 #### Planner
 - Survey YiPay open protocols and realistic Alipay/WeChat personal/merchant receive options.
 - Decide stack (recommend Node/Go/PHP only after findings; prefer maintainable modern stack).
-- Produce architecture, ER diagram notes, env vars, deploy notes.
-- Keep plan files updated as truth for teammates.
+- Produce architecture, ER diagram notes, env vars, deploy notes under `docs/`.
+- Keep plan files under `docs/planning/` updated as truth for teammates.
 
-#### PayCore
-- Implement payment core from plan: orders, channels, callbacks, idempotency, signature verify, retry notify.
-- Alipay path first: configure Alipay account / app credentials → money lands correctly.
-- WeChat path second if credentials model is clear.
-- Provide API docs for newapi integration.
+#### Coder
+- Dedicated implementation role for production code (server, admin, shared packages, tests).
+- Prefer small reviewable commits; push each completed slice.
+- Follow directory layout and do not dump new files into repo root.
+
+#### PayCore / E2EFixer
+- Implement payment core: orders, channels, callbacks, idempotency, signature verify, retry notify.
+- Alipay path first; WeChat second if credentials model is clear.
+- Keep mock E2E single-command and deterministic.
 - Every completed step: commit + push (see Git rules).
 
 #### AdminUI
@@ -59,9 +66,19 @@ Build a lightweight **YiPay-compatible payment collection platform** for **newap
 - Screens: login, dashboard, channels (Alipay/WeChat), orders, notify logs, system settings, API credentials.
 - English code; Chinese UI labels OK.
 
+#### UIPolish
+- Make the admin/pay UI **look good**: visual hierarchy, color system, cards, tables, empty/error states, mobile density.
+- Implement visual tokens from Designer; prefer CSS/theme files under `apps/admin/src/styles/` and shared components under `apps/admin/src/components/`.
+- Do not invent new API contracts.
+
+#### FileManager
+- Enforce classified directories; move misplaced files; keep root minimal.
+- Own `.gitignore` hygiene and temp isolation under `.tmp/<task-id>/`.
+- Never delete user/business content without Lead authorization; prefer `git mv` preserving history.
+
 #### Designer
 - Define IA and critical flows: “fill Alipay account → receive money”, order lookup, notify failure handling.
-- Provide layout/visual guidance AdminUI can implement without redesign thrash.
+- Provide layout/visual guidance AdminUI/UIPolish can implement without redesign thrash.
 
 ---
 
@@ -189,27 +206,47 @@ Treat as recoverable: provider rate limits (429), gateway/network/DNS failures, 
 
 ---
 
-## 6. Suggested Directory Layout (v0.1 scaffold)
+## 6. Directory Layout & File Classification (mandatory)
+
+**Do not dump everything into the repo root.** Same category → same folder. English path names only.
 
 ```text
 HuaJian_Pay/
-  AGENTS.md
-  README.md
+  AGENTS.md                 # team rules only (root OK)
+  README.md                 # product entry only (root OK)
+  package.json              # monorepo root
+  pnpm-workspace.yaml
+  .env.example
   .gitignore
+  apps/
+    server/                 # payment backend
+    admin/                  # Vue admin console
+  packages/                 # shared libs (optional)
   docs/
     architecture.md
     api.md
+    deployment.md
     newapi-integration.md
-  apps/                 # or services/ depending on stack decision
-  packages/             # shared libs if monorepo
-  scripts/
-  .env.example
-  task_plan.md          # Planner
-  findings.md           # Planner
-  progress.md           # Planner / team
+    security-checklist.md
+    planning/               # task_plan, findings, progress
+    ux/                     # flows, IA, visual system, reviews
+    briefs/                 # Lead task briefs
+  scripts/                  # e2e / ops scripts
+  data/                     # local sqlite (gitignored content)
+  .tmp/<task-id>/           # temp only; never ship as product
 ```
 
-Stack is **not frozen** until Planner publishes findings. Early preference: simple deployable backend + web admin, MySQL/SQLite, Redis optional.
+### Classification rules
+1. Root may only hold monorepo/tooling entry files + `AGENTS.md` + `README.md`.
+2. Planning notes → `docs/planning/` (not root).
+3. Product/API/ops docs → `docs/`.
+4. UX docs → `docs/ux/`.
+5. Lead briefs → `docs/briefs/`.
+6. Runtime code → `apps/*` or `packages/*`.
+7. Scripts → `scripts/`.
+8. Temporary diagnostics → `.tmp/<task-id>/` only.
+9. **FileManager** owns reorganizations; others create files in the correct folder from the start.
+10. When moving files, update imports/README links in the same commit.
 
 ---
 
@@ -230,11 +267,11 @@ Lead may adjust tags when scope changes.
 
 ## 8. Immediate Priority Order
 
-1. Scaffold repo + this AGENTS + push + tag `v0.1.0`
-2. Planner: architecture & Alipay/WeChat feasibility findings
-3. PayCore: payment core (Alipay first)
-4. AdminUI + Designer: console and flows
-5. newapi integration doc + end-to-end verify
+1. Keep mock E2E single-command green (`pnpm test:mock-e2e`)
+2. FileManager: classify root planning files into `docs/planning/`
+3. Coder: backend/frontend feature work as assigned
+4. UIPolish: premium visual polish for admin console
+5. Deployment/security docs accuracy + newapi-ready baseline
 
 ---
 
