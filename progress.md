@@ -4,9 +4,15 @@
 - Planner produced full `findings.md` (YiPay API, Alipay/WeChat feasibility, stack lock) — commit `0afcc2c`
 - Lead sealed plan package: `docs/architecture.md`, `docs/api.md`, updated task_plan/progress — commit `40eea63`, tag `v0.2.0`
 - Designer UX complete: `docs/ux/flows.md`, `docs/ux/ia.md`, `docs/ux/visual-system.md` (commit `ffc8e20`)
-- Architecture task board item completed by Planner
-- Next: PayCore implements `apps/server` Alipay MVP (task in_progress)
-- AdminUI can implement shell/channels/orders/pay against UX docs; align status enums with PayCore API when ready
+- PayCore Alipay MVP complete on main (slices A–F):
+  - `ab1408b` scaffold
+  - `b788bff` drizzle schema/migrate/seed
+  - `4c1c23b` YiPay sign + create/query
+  - `d73eaf1` Alipay precreate + notify
+  - `1220179` merchant notify worker
+  - `451bf6f` admin API skeleton
+- Tag **v0.3.0** — backend Alipay MVP
+- Next: AdminUI console against `/admin/api/*`
 
 ## 2026-07-24
 - Cloned empty repo to `D:\pay\HuaJian_Pay`
