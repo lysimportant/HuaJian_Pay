@@ -1,34 +1,11 @@
 <script setup lang="ts">
-import {computed,h,onMounted,ref,watch} from 'vue';
-import {useRoute,useRouter} from 'vue-router';
-import {NButton,NCard,NConfigProvider,NDataTable,NForm,NFormItem,NInput,NInputNumber,NLayout,NLayoutContent,NLayoutHeader,NLayoutSider,NMenu,NMessageProvider,NModal,NSelect,NStatistic,NTag,NText,createDiscreteApi,zhCN,dateZhCN,type DataTableColumns} from 'naive-ui';
-import {api} from './api';
-const route=useRoute(),router=useRouter(),{message}=createDiscreteApi(['message']);
-const loading=ref(false),username=ref('admin'),password=ref(''),rows=ref<any[]>([]),summary=ref<any>({}),page=ref(1),total=ref(0),filters=ref<any>({}),modal=ref(false),form=ref<any>({});
-const isLogin=computed(()=>route.path==='/login');
-const active=computed(()=>route.path.slice(1)||'dashboard');
-const titles:Record<string,string>={dashboard:'数据概览',orders:'订单管理',merchants:'商户管理',channels:'支付通道',settings:'系统设置'};
-const menu=[{label:'数据概览',key:'dashboard'},{label:'订单管理',key:'orders'},{label:'商户管理',key:'merchants'},{label:'支付通道',key:'channels'},{label:'系统设置',key:'settings'}];
-function currency(v:any){return `¥${(Number(v||0)/100).toFixed(2)}`}
-function stateTag(v:string){const map:any={PAID:['已支付','success'],PENDING:['待支付','warning'],CLOSED:['已关闭','default'],ACTIVE:['正常','success'],DISABLED:['停用','error'],ENABLED:['已启用','success']};const x=map[v]||[v||'-','default'];return h(NTag,{type:x[1],size:'small',round:true},{default:()=>x[0]});}
-async function login(){loading.value=true;try{const r:any=await api.post('/auth/login',{username:username.value,password:password.value});localStorage.setItem('admin_token',r.data?.token||r.token);await router.push('/dashboard')}catch(e:any){message.error(e.response?.data?.error?.message||'登录失败')}finally{loading.value=false}}
-async function load(){if(isLogin.value)return;loading.value=true;try{const p=active.value;if(p==='dashboard'){const r:any=await api.get('/dashboard/summary');summary.value=r.data||r}else if(p==='orders'){const r:any=await api.get('/orders',{params:{...filters.value,page:page.value,pageSize:20}});rows.value=r.data?.items||r.items||[];total.value=r.data?.total||r.total||0}else if(['merchants','channels'].includes(p)){const r:any=await api.get('/'+p,{params:{page:page.value,pageSize:20}});rows.value=r.data?.items||r.items||r.data||r;total.value=r.data?.total||r.total||rows.value.length}}catch(e:any){message.error(e.response?.data?.error?.message||'数据加载失败')}finally{loading.value=false}}
-function openCreate(){form.value=active.value==='merchants'?{status:'ACTIVE'}:{code:'alipay',name:'支付宝',enabled:true,config:{}};modal.value=true}
-async function save(){try{await api.post('/'+active.value,form.value);message.success('创建成功');modal.value=false;load()}catch(e:any){message.error(e.response?.data?.error?.message||'保存失败')}}
-async function toggle(row:any){try{await api.patch(`/${active.value}/${row.id}/status`,{status:row.status==='ACTIVE'?'DISABLED':'ACTIVE',enabled:!row.enabled});message.success('状态已更新');load()}catch{message.error('操作失败')}}
-function logout(){localStorage.removeItem('admin_token');router.push('/login')}
-const orderCols:DataTableColumns<any>=[{title:'平台订单号',key:'tradeNo'},{title:'商户订单号',key:'outTradeNo'},{title:'金额',key:'amount',render:r=>currency(r.amount)},{title:'状态',key:'status',render:r=>stateTag(r.status)},{title:'创建时间',key:'createdAt'}];
-const merchantCols:DataTableColumns<any>=[{title:'商户名称',key:'name'},{title:'商户号',key:'merchantNo'},{title:'费率',key:'feeRate',render:r=>`${r.feeRate??0}%`},{title:'状态',key:'status',render:r=>stateTag(r.status)},{title:'操作',key:'x',render:r=>h(NButton,{text:true,type:'primary',onClick:()=>toggle(r)},{default:()=>r.status==='ACTIVE'?'停用':'启用'})}];
-const channelCols:DataTableColumns<any>=[{title:'通道名称',key:'name'},{title:'编码',key:'code'},{title:'状态',key:'enabled',render:r=>stateTag(r.enabled?'ENABLED':'DISABLED')},{title:'操作',key:'x',render:r=>h(NButton,{text:true,type:'primary',onClick:()=>toggle(r)},{default:()=>r.enabled?'停用':'启用'})}];
-watch(()=>route.path,()=>{page.value=1;load()});onMounted(load);
+import { NConfigProvider, NMessageProvider, dateZhCN, zhCN } from 'naive-ui'
 </script>
-<template><n-config-provider :locale="zhCN" :date-locale="dateZhCN"><n-message-provider>
-<div v-if="isLogin" class="login"><div class="login-brand"><div class="brand-mark">花</div><h1>花间支付</h1><p>安全、稳定、清晰的聚合支付管理平台</p></div><n-card class="login-card" :bordered="false"><h2>欢迎回来</h2><p class="muted">登录管理控制台</p><n-form @submit.prevent="login"><n-form-item label="管理员账号"><n-input v-model:value="username" placeholder="请输入账号"/></n-form-item><n-form-item label="密码"><n-input v-model:value="password" type="password" show-password-on="click" placeholder="请输入密码" @keyup.enter="login"/></n-form-item><n-button type="primary" block size="large" :loading="loading" @click="login">登 录</n-button></n-form></n-card></div>
-<n-layout v-else has-sider class="shell"><n-layout-sider bordered :width="224"><div class="logo"><span>花</span><b>花间支付</b></div><n-menu :value="active" :options="menu" @update:value="v=>router.push('/'+v)"/></n-layout-sider><n-layout><n-layout-header bordered class="header"><div><b>{{titles[active]}}</b><small>运营管理控制台</small></div><div><n-text depth="3">管理员</n-text><n-button quaternary @click="logout">退出登录</n-button></div></n-layout-header><n-layout-content class="content">
-<template v-if="active==='dashboard'"><div class="hero"><div><h1>今日经营概览</h1><p>实时掌握平台关键经营指标</p></div><n-button @click="load">刷新数据</n-button></div><div class="stats"><n-card><n-statistic label="今日交易金额" :value="currency(summary.todayAmount)"/><small>平台实时汇总</small></n-card><n-card><n-statistic label="今日订单" :value="summary.todayOrders||0"/><small>全部支付订单</small></n-card><n-card><n-statistic label="成功率" :value="`${summary.successRate||0}%`"/><small>支付成功占比</small></n-card><n-card><n-statistic label="活跃商户" :value="summary.activeMerchants||0"/><small>正常运营商户</small></n-card></div><n-card title="运营提示" class="section"><p>订单、商户与支付通道状态均可在左侧导航中集中管理。</p></n-card></template>
-<template v-else-if="active==='orders'"><div class="toolbar"><n-input v-model:value="filters.keyword" clearable placeholder="搜索平台/商户订单号"/><n-select v-model:value="filters.status" clearable placeholder="订单状态" :options="[{label:'待支付',value:'PENDING'},{label:'已支付',value:'PAID'},{label:'已关闭',value:'CLOSED'}]"/><n-button type="primary" @click="load">查询</n-button></div><n-card :bordered="false"><n-data-table :columns="orderCols" :data="rows" :loading="loading" :pagination="{page,pageSize:20,itemCount:total,onChange:(p:number)=>{page=p;load()}}"/></n-card></template>
-<template v-else-if="active==='merchants'||active==='channels'"><div class="hero"><div><h1>{{titles[active]}}</h1><p>{{active==='merchants'?'维护商户资料、费率与启停状态':'配置支付宝等支付通道及运行状态'}}</p></div><n-button type="primary" @click="openCreate">{{active==='merchants'?'新增商户':'新增通道'}}</n-button></div><n-card :bordered="false"><n-data-table :columns="active==='merchants'?merchantCols:channelCols" :data="rows" :loading="loading"/></n-card></template>
-<template v-else><n-card title="系统设置" :bordered="false"><n-form label-placement="left" label-width="120"><n-form-item label="平台名称"><n-input value="花间支付"/></n-form-item><n-form-item label="通知重试"><n-input-number :value="5"/><span class="suffix">次</span></n-form-item><n-button type="primary" @click="message.success('设置已保存')">保存设置</n-button></n-form></n-card></template>
-</n-layout-content></n-layout></n-layout>
-<n-modal v-model:show="modal" preset="card" :title="active==='merchants'?'新增商户':'新增通道'" style="width:520px"><n-form label-placement="top"><template v-if="active==='merchants'"><n-form-item label="商户名称"><n-input v-model:value="form.name"/></n-form-item><n-form-item label="商户号"><n-input v-model:value="form.merchantNo"/></n-form-item><n-form-item label="签名密钥"><n-input v-model:value="form.secret"/></n-form-item><n-form-item label="费率（%）"><n-input-number v-model:value="form.feeRate" :min="0"/></n-form-item></template><template v-else><n-form-item label="通道名称"><n-input v-model:value="form.name"/></n-form-item><n-form-item label="通道编码"><n-input v-model:value="form.code"/></n-form-item><n-form-item label="支付宝 App ID"><n-input v-model:value="form.config.appId"/></n-form-item></template><n-button type="primary" @click="save">确认创建</n-button></n-form></n-modal>
-</n-message-provider></n-config-provider></template>
+
+<template>
+  <n-config-provider :locale="zhCN" :date-locale="dateZhCN">
+    <n-message-provider>
+      <router-view />
+    </n-message-provider>
+  </n-config-provider>
+</template>
