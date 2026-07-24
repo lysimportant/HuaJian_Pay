@@ -5,8 +5,8 @@
 - Lead sealed plan package: `docs/architecture.md`, `docs/api.md`, updated task_plan/progress
 - Pending push: architecture commit + tag `v0.2.0`
 - Next: PayCore implements `apps/server` Alipay MVP
-- Designer UX docs still in progress
-- AdminUI / PayCore standby until briefs
+- Designer UX complete: `docs/ux/flows.md`, `docs/ux/ia.md`, `docs/ux/visual-system.md` (commit `ffc8e20`)
+- AdminUI can implement shell/channels/orders/pay against UX docs; align status enums with PayCore API when ready
 
 ## 2026-07-24
 - Cloned empty repo to `D:\pay\HuaJian_Pay`
