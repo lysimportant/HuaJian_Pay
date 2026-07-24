@@ -1,146 +1,159 @@
 # HuaJian_Pay — Production Deployment & Operations Plan
 
-> **Status (verified against repo HEAD):** Local SQLite + mock/alipay channel path is the **implemented** runtime.
-> **Docker Compose / MySQL production stack** described below is a **recommended target architecture only** — **not implemented** in this repository (no `Dockerfile`, no `docker-compose.yml` as of this doc revision).
+> **Verified against git HEAD package manifests (authoritative):**
+> - root `package.json` scripts only: `dev`, `build`, `start`, `typecheck`, `test:mock-e2e`
+> - `@huajian/server` scripts: `dev`, `build`, `start`, `typecheck`
+> - `@huajian/admin` scripts: `dev`, `build`, `typecheck`, `preview` (via `pnpm --filter @huajian/admin …`)
+> - `.env.example`: **`PORT=8080`**, `HOST=0.0.0.0`, SQLite default, `CHANNEL_MODE=mock|alipay`
 >
-> Corrected against: root `package.json`, `.env.example`, `apps/server` env defaults, and `pnpm test:mock-e2e` (port **8080**).
+> **Docker / MySQL production stack below is a recommended target only — not implemented** (no `Dockerfile`, no `docker-compose.yml` in repo).
 
 ---
 
-## 1. What is actually implemented
+## 1. Implementation status
 
 | Capability | Status | Notes |
 | --- | --- | --- |
-| Node monorepo (`pnpm`) | ✅ Implemented | Root scripts orchestrate server + admin |
-| HTTP API server | ✅ Implemented | Default `HOST=0.0.0.0`, **`PORT=8080`** |
-| SQLite database | ✅ Implemented | `DB_DRIVER=sqlite`, `DB_DSN=./data/huajian_pay.db` |
-| Admin UI (Vite) | ✅ Implemented | `pnpm dev:admin` (dev); production static build via `pnpm build` |
-| Mock channel + E2E | ✅ Implemented | `CHANNEL_MODE=mock`; `pnpm test:mock-e2e` self-starts server, waits `/health`, full flow, kills child |
-| Alipay channel config slots | ✅ Partial | Env keys present; enable with `CHANNEL_MODE=alipay` + real keys |
-| MySQL driver wiring | ⚠️ Planned / partial | Commented in `.env.example`; **do not assume production-ready** |
-| Docker / Compose | ❌ **Not implemented** | Section 6 is **recommendation only** |
-| Managed reverse proxy configs | ❌ Not in repo | Use nginx/Caddy examples in Section 5 as templates |
+| pnpm monorepo | ✅ | `pnpm-workspace.yaml`; packages under `apps/*` |
+| HTTP API (`@huajian/server`) | ✅ | Fastify; default **`PORT=8080`**, `HOST=0.0.0.0` |
+| SQLite | ✅ | `DB_DRIVER=sqlite`, `DB_DSN=./data/huajian_pay.db` |
+| Admin SPA (`@huajian/admin`) | ✅ code | Vue/Vite app; **not** wired as a root script |
+| Mock channel + E2E | ✅ | `CHANNEL_MODE=mock`; `pnpm test:mock-e2e` self-starts server, waits `/health`, full flow, kills child |
+| Alipay env slots | ✅ partial | Fill keys; set `CHANNEL_MODE=alipay` |
+| MySQL | ⚠️ template | Commented block in `.env.example` only — **not production-ready** |
+| Docker / Compose | ❌ **not implemented** | See §6 recommendations only |
+| Root `dev:admin` / `dev:server` / `lint` | ❌ **do not exist** | Use commands in §3 only |
 
 ---
 
-## 2. Runtime topology (current monorepo)
+## 2. Repo layout (ops-relevant)
 
-```
+```text
 HuaJian_Pay/
-  package.json          # workspace scripts (source of truth for commands)
-  .env.example          # env template (copy to .env — never commit secrets)
-  apps/server/          # API + pay notify + admin API
-  apps/admin/           # Admin SPA
-  scripts/mock-e2e.mjs  # Single-command mock E2E (spawns server itself)
-  docs/                 # This file and integration guides
-  data/                 # SQLite file location (local/default)
+  package.json              # root scripts (source of truth)
+  pnpm-workspace.yaml
+  .env.example              # copy → .env (never commit secrets)
+  apps/server/              # API + pay + admin API
+  apps/admin/               # Admin SPA (separate package scripts)
+  scripts/mock-e2e.mjs
+  docs/
+  data/                     # default SQLite location
 ```
 
-**Default public base URL (local):** `http://localhost:8080` (`APP_URL` / `PORT` in `.env.example`).
+Local API base: `http://localhost:8080` (`APP_URL` / `PORT` in `.env.example`).
 
 ---
 
-## 3. Package scripts (root `package.json` — authoritative)
+## 3. Commands that actually exist
 
-| Script | Purpose |
+### 3.1 Root `package.json` (only these)
+
+| Command | Expands to | Purpose |
+| --- | --- | --- |
+| `pnpm dev` | `pnpm --filter @huajian/server dev` | API dev (`tsx watch src/index.ts`) |
+| `pnpm build` | `pnpm --filter @huajian/server build` | Compile server (`tsc` → `dist/`) |
+| `pnpm start` | `pnpm --filter @huajian/server start` | Run `node dist/index.js` on **PORT** (default **8080**) |
+| `pnpm typecheck` | `pnpm --filter @huajian/server typecheck` | Server `tsc --noEmit` |
+| `pnpm test:mock-e2e` | `node scripts/mock-e2e.mjs` | Self-contained mock E2E |
+
+**There are no root scripts named** `dev:server`, `dev:admin`, `lint`, `start:prod`, `docker:up`, or concurrent “dev both apps”.
+
+### 3.2 Server package (`@huajian/server`)
+
+| Command | Purpose |
 | --- | --- |
-| `pnpm dev` | Concurrent `dev:server` + `dev:admin` |
-| `pnpm dev:server` | Server only (`pnpm --filter @huajian/server dev`) |
-| `pnpm dev:admin` | Admin Vite dev server |
-| `pnpm build` | Build all packages / apps in workspace |
-| `pnpm start` | Start **server** production entry (`@huajian/server start`) |
-| `pnpm test:mock-e2e` | **Self-contained** mock E2E: spawn `CHANNEL_MODE=mock` server → wait `/health` → login/order/query/mock-paid/notify → kill child |
-| `pnpm lint` | Workspace lint if configured |
+| `pnpm --filter @huajian/server dev` | same as root `pnpm dev` |
+| `pnpm --filter @huajian/server build` | `tsc -p tsconfig.json` |
+| `pnpm --filter @huajian/server start` | `node dist/index.js` |
+| `pnpm --filter @huajian/server typecheck` | `tsc --noEmit` |
 
-### Production process (implemented path)
+### 3.3 Admin package (`@huajian/admin`)
+
+Admin is **not** started by root `pnpm dev`. Use filter:
+
+| Command | Purpose |
+| --- | --- |
+| `pnpm --filter @huajian/admin dev` | Vite dev server |
+| `pnpm --filter @huajian/admin build` | `vue-tsc --noEmit && vite build` |
+| `pnpm --filter @huajian/admin typecheck` | `vue-tsc --noEmit` |
+| `pnpm --filter @huajian/admin preview` | Preview production static build |
+
+### 3.4 Local full-stack (two terminals)
 
 ```bash
-# From repo root HuaJian_Pay/
-cp .env.example .env   # then edit secrets
-pnpm install
-pnpm build
-pnpm start             # serves API on PORT (default 8080)
+# Terminal A — API (port 8080 by default)
+pnpm dev
+
+# Terminal B — Admin UI
+pnpm --filter @huajian/admin dev
 ```
 
-Admin production static assets: build with `pnpm build`, then either:
+### 3.5 Production-ish process (implemented path = Node + SQLite)
 
-1. Serve `apps/admin` dist behind the same reverse proxy as the API, or  
-2. Point CDN/static host at admin `dist` and set CORS / `APP_URL` accordingly.
+```bash
+# Repo root HuaJian_Pay/
+cp .env.example .env   # edit secrets; keep PORT=8080 unless reverse-proxied differently
+pnpm install
+pnpm build             # builds @huajian/server only
+pnpm start             # listens HOST/PORT from env (default 0.0.0.0:8080)
 
-> There is **no** root script named `start:prod` / `docker:up` unless added later — do not document fictional scripts.
+# Optional: production admin assets
+pnpm --filter @huajian/admin build
+# Serve apps/admin/dist via CDN or reverse proxy (not bundled into root start).
+```
 
-### Smoke / regression
+### 3.6 Smoke / regression
 
 ```bash
 pnpm test:mock-e2e
-# Expect: PASS mock e2e (exit 0). Script must not require a pre-running server.
+# Expect: PASS mock e2e (exit 0).
+# Script spawns CHANNEL_MODE=mock server, waits GET /health, runs login/order/query/mock-paid/notify, kills child.
+# Does not require a pre-running server.
+```
+
+### 3.7 Pre-release checks (recommended)
+
+```bash
+pnpm typecheck
+pnpm --filter @huajian/admin typecheck
+pnpm build
+pnpm --filter @huajian/admin build
+pnpm test:mock-e2e
 ```
 
 ---
 
-## 4. Environment variables (aligned with `.env.example`)
+## 4. Environment (`.env.example`)
 
 Copy `.env.example` → `.env`. **Never commit real secrets.**
 
-### Core
-
-| Variable | Example / default | Required | Description |
-| --- | --- | --- | --- |
-| `APP_NAME` | `HuaJian_Pay` | no | Display name |
-| `APP_ENV` | `local` / `production` | yes (prod) | Environment label |
-| `APP_URL` | `http://localhost:8080` | yes | Public base URL (callbacks, links) |
-| `APP_SECRET` | long random | yes (prod) | App signing / session material |
-| `HOST` | `0.0.0.0` | no | Bind address |
-| **`PORT`** | **`8080`** | no | **HTTP listen port (default 8080, not 3000)** |
-| `CHANNEL_MODE` | `mock` \| `alipay` | yes | Channel adapter |
-
-### Database
-
-| Variable | Example | Notes |
+| Variable | Example / default | Notes |
 | --- | --- | --- |
-| `DB_DRIVER` | `sqlite` (default implemented path) | MySQL values are **template / future** |
+| `APP_NAME` | `HuaJian_Pay` | Display |
+| `APP_ENV` | `local` / `production` | Label |
+| `APP_URL` | `http://localhost:8080` | Public base URL |
+| `APP_SECRET` | long random | Required in prod |
+| `HOST` | `0.0.0.0` | Bind |
+| **`PORT`** | **`8080`** | **HTTP listen port (not 3000)** |
+| `CHANNEL_MODE` | `mock` \| `alipay` | Channel adapter |
+| `DB_DRIVER` | `sqlite` | Implemented default |
 | `DB_DSN` | `./data/huajian_pay.db` | SQLite path |
-| `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASS` | commented in `.env.example` | **Only if/when MySQL is fully implemented** |
-
-### Admin bootstrap
-
-| Variable | Notes |
-| --- | --- |
-| `ADMIN_USERNAME` | Initial admin user |
-| `ADMIN_PASSWORD` | Change immediately in production |
-
-### Alipay (when `CHANNEL_MODE=alipay`)
-
-`ALIPAY_APP_ID`, `ALIPAY_PRIVATE_KEY`, `ALIPAY_PUBLIC_KEY`, `ALIPAY_NOTIFY_URL`, `ALIPAY_RETURN_URL`, optional `ALIPAY_ACCOUNT`.
-
-### WeChat (optional / future)
-
-Keys present in `.env.example` as placeholders — treat as **not go-live** until product enables WeChat.
-
-### Platform (YiPay-compatible merchant defaults)
-
-| Variable | Example | Notes |
-| --- | --- | --- |
-| `PLATFORM_PID` | `1000` | Platform merchant pid |
-| `PLATFORM_KEY` | strong secret | Merchant sign key |
+| `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASS` | commented | MySQL **template only** |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | bootstrap | Change in prod |
+| `ALIPAY_*` | empty in example | Required when `CHANNEL_MODE=alipay` |
+| `WECHAT_*` | empty | Optional / future |
+| `PLATFORM_PID` / `PLATFORM_KEY` | YiPay-compatible defaults | Merchant platform key |
 
 ---
 
-## 5. Reverse proxy (template — not shipped as files)
+## 5. Reverse proxy (template — not shipped in repo)
 
-TLS termination and HTTP→HTTPS should sit in front of Node on **8080**.
-
-### nginx (example)
+Terminate TLS in front of Node on **8080**.
 
 ```nginx
 server {
   listen 443 ssl http2;
   server_name pay.example.com;
-
-  # ssl_certificate     /path/fullchain.pem;
-  # ssl_certificate_key /path/privkey.pem;
-
-  client_max_body_size 2m;
 
   location / {
     proxy_pass http://127.0.0.1:8080;
@@ -153,26 +166,18 @@ server {
 }
 ```
 
-Set `APP_URL=https://pay.example.com` and Alipay notify/return URLs to the public HTTPS origin.
+Set `APP_URL=https://pay.example.com` and payment notify/return URLs to the public HTTPS origin.
 
 ---
 
-## 6. Docker / MySQL — **recommended only (NOT implemented)**
+## 6. Docker / MySQL — recommended only (**NOT implemented**)
 
-The following is a **target** ops shape for a later milestone. **This repository does not currently provide Docker assets.** Do not run these commands expecting them to work out of the box.
+Do **not** document or run fictional root scripts. When Docker is added later, introduce real `Dockerfile` / `docker-compose.yml` and update this section.
 
-### Suggested future layout (illustrative)
-
-```text
-# NOT IN REPO TODAY
-Dockerfile              # multi-stage: pnpm build → node start
-docker-compose.yml      # app + mysql + optional caddy
-```
-
-### Suggested compose sketch (do not treat as checked-in truth)
+Illustrative target (not in git today):
 
 ```yaml
-# ILLUSTRATIVE ONLY — unimplemented template
+# ILLUSTRATIVE ONLY — unimplemented
 services:
   app:
     # build: .
@@ -181,37 +186,27 @@ services:
       APP_ENV: production
       PORT: "8080"
       DB_DRIVER: mysql
-      # DB_HOST: mysql
-    # depends_on: [mysql]
   mysql:
     image: mysql:8
-    # volumes / secrets omitted
 ```
 
-### When implementing later
-
-1. Add real `Dockerfile` + `docker-compose.yml` and wire CI.  
-2. Finish MySQL migrations/driver parity with SQLite.  
-3. Healthcheck against `GET /health` on port 8080.  
-4. Update this section from “recommended” → “implemented” only after assets land in git.
+Before calling MySQL “supported”: implement driver parity, migrations, healthcheck on `GET /health`, and CI.
 
 ---
 
-## 7. Operations checklist (implemented stack)
-
-### Before go-live (SQLite or future MySQL)
+## 7. Operations checklist (current Node + SQLite path)
 
 - [ ] `.env` not in git; secrets rotated from example defaults  
 - [ ] `APP_ENV=production`, strong `APP_SECRET` / `PLATFORM_KEY` / `ADMIN_PASSWORD`  
 - [ ] `APP_URL` and notify URLs use public **HTTPS**  
-- [ ] `CHANNEL_MODE` correct (`mock` only for staging drills)  
-- [ ] `pnpm build` succeeds on release host  
-- [ ] `pnpm test:mock-e2e` green on CI or release candidate  
-- [ ] Process supervisor (systemd / pm2 / container) restarts `pnpm start`  
-- [ ] Log rotation + disk watch on `data/` (SQLite)  
-- [ ] Backup policy for DB file or future MySQL dumps  
+- [ ] `CHANNEL_MODE=mock` only for staging drills  
+- [ ] `pnpm build` + `pnpm start` on release host (port **8080** or proxy→8080)  
+- [ ] `pnpm test:mock-e2e` green on RC  
+- [ ] Process supervisor (systemd / pm2) restarts `pnpm start`  
+- [ ] Backup `data/huajian_pay.db` (or future MySQL dumps)  
+- [ ] Admin static (`pnpm --filter @huajian/admin build`) deployed if UI is required  
 
-### systemd sketch (Node on host)
+### systemd sketch
 
 ```ini
 [Unit]
@@ -223,32 +218,23 @@ WorkingDirectory=/opt/HuaJian_Pay
 EnvironmentFile=/opt/HuaJian_Pay/.env
 ExecStart=/usr/bin/pnpm start
 Restart=on-failure
-User=www-data
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-### Health
+### Health / rollback
 
-- Probe: `GET http://127.0.0.1:8080/health` (or via public HTTPS).  
-- Mock E2E already waits on `/health` before exercising pay flow.
-
-### Rollback
-
-1. Keep previous `pnpm build` artifact or git tag.  
-2. Stop process → restore DB backup → deploy previous tag → `pnpm start`.  
-3. Re-run `pnpm test:mock-e2e` in staging before re-enabling traffic.
+- Probe: `GET /health` on the API port (default **8080**).  
+- Rollback: previous git tag → restore DB backup → `pnpm build && pnpm start` → re-run `pnpm test:mock-e2e` in staging.
 
 ---
 
-## 8. Security ops (pointer)
+## 8. Security pointer
 
-Full threat model and go-live security checklist: follow task **`docs/security-checklist.md`** (produced after this deployment doc is accepted). Minimum here:
+Full threat model / go-live checklist: `docs/security-checklist.md` (follow-on task after this doc is accepted).
 
-- Never log `PLATFORM_KEY`, Alipay private keys, or raw notify bodies with secrets.  
-- Restrict admin to VPN / IP allowlist where possible.  
-- Prefer mock channel in non-prod; production keys only on production hosts.
+Minimum: never log `PLATFORM_KEY` or Alipay private keys; restrict admin exposure; mock channel outside production.
 
 ---
 
@@ -256,4 +242,5 @@ Full threat model and go-live security checklist: follow task **`docs/security-c
 
 | Date | Change |
 | --- | --- |
-| 2026-07-25 | Corrected against real root scripts, `.env.example`, default **PORT=8080**, self-start `pnpm test:mock-e2e`. Marked Docker/MySQL as **unimplemented recommendations**. Removed assumptions of non-existent compose/Dockerfile scripts. |
+| 2026-07-25 | First correction pass: port 8080, mock E2E, Docker/MySQL as non-implemented. |
+| 2026-07-25 | **Incremental fix:** removed non-existent root scripts (`dev:admin`, `dev:server`, `lint`, concurrent root `dev`). Documented **only** root scripts from `package.json` and filter commands for `@huajian/admin` / `@huajian/server`. |
