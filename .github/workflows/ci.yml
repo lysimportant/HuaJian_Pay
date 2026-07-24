@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-e2e:
+    name: install · typecheck · build · mock-e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Server typecheck
+        run: pnpm --filter @huajian/server typecheck
+
+      - name: Server build
+        run: pnpm --filter @huajian/server build
+
+      - name: Admin build
+        run: pnpm --filter @huajian/admin build
+
+      - name: Mock E2E (self-start)
+        run: pnpm test:mock-e2e
+        env:
+          # mock-e2e.mjs self-starts CHANNEL_MODE=mock when /health is down
+          E2E_START_TIMEOUT_MS: "90000"
