@@ -80,7 +80,7 @@ Or signed query variant. Return status, money, trade_no, paid flag.
 | Channel | Path | Verify |
 | --- | --- | --- |
 | Alipay | `POST /channels/alipay/notify` | RSA2, amount, out_trade_no, trade_status |
-| WeChat | `POST /channels/wxpay/notify` | APIv3 RSA verify + AES-256-GCM decrypt; headers Wechatpay-*; see `docs/wechat-pay.md` |
+| WeChat | `POST /channels/wxpay/notify` | APIv3 RSA verify + AES-256-GCM decrypt; headers Wechatpay-Timestamp/Nonce/Signature/Serial; response `{"code":"SUCCESS"}`; see `docs/wechat-pay.md` |
 
 On success: mark order paid (idempotent), enqueue merchant notify, respond per channel rules.
 
@@ -116,8 +116,8 @@ Retry with backoff on failure; persist attempts.
 | GET | `/admin/api/me` | Current admin |
 | GET | `/admin/api/orders` | List/filter orders |
 | GET | `/admin/api/orders/:tradeNo` | Detail + notify logs |
-| GET/PUT | `/admin/api/channels/alipay` | Alipay config |
-| GET/PUT | `/admin/api/channels/wechat` | WeChat config |
+| GET/PUT | `/admin/api/channels/alipay` | Alipay config (GET never echoes secrets; PUT empty = preserve) |
+| GET/PUT | `/admin/api/channels/wxpay` | WeChat APIv3 config (GET never echoes api_v3_key/private_key/platform_public_key; PUT empty secret = preserve); see `docs/wechat-pay.md` |
 | GET | `/admin/api/merchants` | Merchant list (MVP may be single) |
 | POST | `/admin/api/merchants` | Create merchant / rotate key |
 
@@ -127,9 +127,9 @@ All admin mutations require auth.
 
 ## 7. newapi wiring (summary)
 
-1. Base URL = public HuaJian_Pay origin  
-2. pid + key from admin  
-3. type `alipay` (then `wxpay`)  
-4. newapi supplies notify_url when creating orders  
+1. Base URL = public HuaJian_Pay origin
+2. pid + key from admin
+3. type lipay or **wxpay** (WeChat Native code_url)
+4. newapi supplies notify_url when creating orders
 
-Full guide: `docs/newapi-integration.md` (after APIs exist).
+Full guide: docs/newapi-integration.md · WeChat ops: docs/wechat-pay.md.

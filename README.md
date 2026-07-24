@@ -32,7 +32,7 @@ https://github.com/lysimportant/HuaJian_Pay.git
 - `docs/api.md` — merchant / admin API sketch
 - `docs/deployment.md` — run & deploy (SQLite volume Docker; **MySQL not implemented**)
 - `docs/newapi-integration.md` — newapi integration
-- `docs/wechat-pay.md` — WeChat APIv3 deploy / certs / notify `/channels/wxpay/notify` / `type=wxpay`
+- `docs/wechat-pay.md` — WeChat APIv3 Native：证书挂载、HTTPS notify、Admin 配置、newapi `type=wxpay`、真实验收
 - `docs/planning/` — task plan, findings, progress
 - `docs/ux/` — flows, IA, visual system, reviews
 - `docs/briefs/` — Lead task briefs

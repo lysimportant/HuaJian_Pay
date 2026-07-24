@@ -14,9 +14,9 @@
 | 支付网关 / API URL | `http://127.0.0.1:8080/` 或 `http://127.0.0.1:8080` | 根地址即可；插件会拼 `/mapi.php`、`/submit.php`、`/api.php` |
 | 商户 ID（pid） | `1000`（默认种子） | 对应 `PLATFORM_PID` / 后台商户 pid |
 | 商户密钥（key） | 与 `PLATFORM_KEY` 一致 | 默认示例为 `change-me-merchant-key`，**生产务必更换** |
-| 支付方式（type） | `alipay` 或 `wxpay` | `alipay` 已可用；`wxpay` 依赖微信 APIv3 核心（见 `docs/wechat-pay.md`，实现中） |
+| 支付方式（type） | `alipay` 或 **`wxpay`** | `wxpay` = 微信 APIv3 Native（正式商户 + 证书，见 `docs/wechat-pay.md`，核心 `5e7740c`） |
 | 签名方式 | `MD5` | `sign_type=MD5`，小写 hex |
-| 设备/通道模式 | 服务端 `CHANNEL_MODE`（如 `mock` / `alipay` / 实现后的微信相关值） | newapi 侧无需配置；本地联调先用 `mock` |
+| 设备/通道模式 | 服务端 `CHANNEL_MODE=mock\|alipay\|wxpay` | newapi 侧无需配置；本地无证书时用 `mock` |
 
 ### 推荐 newapi 映射
 
@@ -25,7 +25,7 @@
 | 易支付接口地址 | `{APP_URL}/` |
 | PID | 商户 `pid` |
 | KEY | 商户 `api_key` |
-| 支付类型 | `alipay` 或 **`wxpay`**（微信 Native；正式商户 + 证书，见 `docs/wechat-pay.md`） |
+| 支付类型 | `alipay` 或 **`wxpay`**（Native `code_url`；回调 `POST /channels/wxpay/notify`） |
 | 签名类型 | MD5 |
 
 ---
@@ -72,6 +72,17 @@
 | `POST /channels/alipay/notify` | 真实支付宝 RSA2 验签 + 金额校验 + 幂等置 paid |
 
 本地 mock 无需配置支付宝公钥；真实模式需在后台 / env 配置密钥，并将支付宝应用网关通知 URL 指到上述路径。
+
+### 2.4 微信渠道回调（微信 → 本平台）
+
+| 路径 | 说明 |
+| --- | --- |
+| `POST /channels/wxpay/notify` | APIv3 平台签名验签 + AES-256-GCM 解密 + 金额/商户校验 + 幂等置 paid |
+
+- newapi 下单 `type=**wxpay**`（不是 `wechat`）
+- 微信商户平台 / 配置中的通知 URL 必须为 **HTTPS** 公网地址指向上述路径
+- Admin：`GET/PUT /admin/api/channels/wxpay`（秘密字段 GET 不回显，PUT 空值保留）
+- 完整证书挂载、轮换与真实验收：`docs/wechat-pay.md`
 
 ---
 
