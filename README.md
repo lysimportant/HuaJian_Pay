@@ -5,7 +5,7 @@ Lightweight **YiPay-style payment collection platform** for **newapi**.
 ## Goal
 
 - Configure **Alipay account / credentials** and receive payments.
-- Optional **WeChat Pay** when the same “receive money�?effect is achievable.
+- Optional **WeChat Pay** when the same “receive money�?effect is achievable.
 - Merchant API close to common YiPay conventions for easy newapi integration.
 - Simple admin console for channels, orders, and notify logs.
 
@@ -26,8 +26,19 @@ https://github.com/lysimportant/HuaJian_Pay.git
 
 ## Docs
 
-- `AGENTS.md` �?team / process / rules
-- `docs/` �?architecture & API (coming next)
+- `AGENTS.md` — team / process / Git / directory layout
+- `docs/structure.md` — repository structure map
+- `docs/architecture.md` — system architecture
+- `docs/api.md` — merchant / admin API sketch
+- `docs/deployment.md` — run & deploy notes
+- `docs/newapi-integration.md` — newapi integration
+- `docs/planning/` — task plan, findings, progress
+- `docs/ux/` — flows, IA, visual system, reviews
+- `docs/briefs/` — Lead task briefs
+
+## Layout (summary)
+
+Root holds only monorepo entry files + `AGENTS.md` / `README.md`. Runtime code lives under `apps/`; docs under `docs/`; scripts under `scripts/`; local DB under `data/` (gitignored); temps under `.tmp/<task-id>/`.
 
 ## License
 

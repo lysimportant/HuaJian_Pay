@@ -33,10 +33,13 @@ Thumbs.db
 *.swp
 *.swo
 
-# Test / temp
+# Test / temp (task-scoped only; never ship product artifacts)
+.tmp/
 .tmp*
 tmp/
 .turbo/
+*.tmp
+.tmp-team-msg.json
 
 # TypeScript emit / incremental (never commit)
 *.tsbuildinfo

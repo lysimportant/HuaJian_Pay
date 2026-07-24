@@ -206,7 +206,9 @@ Treat as recoverable: provider rate limits (429), gateway/network/DNS failures, 
 
 ---
 
-## 6. Directory Layout & File Classification (mandatory)
+## 6. Directory Layout
+
+Canonical tree map: `docs/structure.md` (maintained by FileManager). & File Classification (mandatory)
 
 **Do not dump everything into the repo root.** Same category → same folder. English path names only.
 
