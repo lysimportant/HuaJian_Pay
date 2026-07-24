@@ -18,6 +18,8 @@
 | 微信结果通知 | **`POST /channels/wxpay/notify`** |
 | Admin 读配置 | **`GET /admin/api/channels/wxpay`** |
 | Admin 写配置 | **`PUT /admin/api/channels/wxpay`** |
+| Admin UI | 路由 **`/channels/wxpay`**（`WxpayView.vue`，commit `b4460b1`）；API 客户端 `fetchWxpayChannel` / `updateWxpayChannel` |
+| 公共支付页 | `type=wxpay` 展示微信品牌 + `code_url` 二维码（`pay-page.ts`） |
 | DB 通道键 | `channel_configs.channel = "wxpay"` |
 | Native 下单 | 微信支付 APIv3 `POST /v3/pay/transactions/native` |
 | 成功支付串 | 响应 `code_url`（写入订单 `pay_url` / `qr_url`） |
@@ -246,3 +248,4 @@ sign_type=MD5
 | 2026-07-25 | FileManager：骨架 |
 | 2026-07-25 | FileManager：对齐工作区字段与 `/channels/wxpay/notify` |
 | 2026-07-25 | FileManager：**对齐已推送核心 `5e7740c`** — Admin GET/PUT、env、Native/notify、newapi、证书/HTTPS/轮换/真实验收 |
+| 2026-07-25 | FileManager：补充 Admin UI `/channels/wxpay` 与支付页 `wxpay` 映射（`b4460b1`） |
