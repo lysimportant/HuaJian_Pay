@@ -1,7 +1,7 @@
 # API — HuaJian_Pay (draft)
 
 YiPay-compatible merchant API + modern aliases.  
-Sign algorithm: **MD5 lowercase**, classic epay style (see `findings.md` §2.2).
+Sign algorithm: **MD5 lowercase**, classic epay style (see `docs/planning/findings.md` §2.2).
 
 ---
 

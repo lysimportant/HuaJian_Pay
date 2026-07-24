@@ -70,3 +70,12 @@ Update in the same commit:
 - Imports only if code paths change (prefer no root code)
 
 Last audited: FileManager task `019f9553-2f5d-7052-833e-d0049d4fdd38`.
+
+## Broken-link audit notes
+
+- Planning docs live under `docs/planning/` only (not repo root).
+- Prefer `docs/planning/findings.md` over bare `findings.md` in product docs.
+- `docs/security-checklist.md` is optional until the security task lands.
+- Root must not list `task_plan.md` / `findings.md` / `progress.md`.
+
+Last link fix: FileManager task `019f9553-2f5d-7052-833e-d0049d4fdd38`.

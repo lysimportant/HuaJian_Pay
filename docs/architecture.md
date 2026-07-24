@@ -1,6 +1,6 @@
 # Architecture — HuaJian_Pay
 
-**Status:** locked for MVP (from `findings.md`, 2026-07-25)  
+**Status:** locked for MVP (from `docs/planning/findings.md`, 2026-07-25)  
 **Repo:** https://github.com/lysimportant/HuaJian_Pay.git
 
 ---
@@ -50,22 +50,24 @@
 HuaJian_Pay/
   AGENTS.md
   README.md
-  task_plan.md
-  findings.md
-  progress.md
   .env.example
   docs/
+    structure.md            # FileManager layout map
     architecture.md
     api.md
-    newapi-integration.md   # later
+    deployment.md
+    newapi-integration.md
+    planning/               # task_plan, findings, progress
     ux/                     # Designer
+    briefs/                 # Lead briefs
   apps/
     server/                 # PayCore
     admin/                  # AdminUI
   packages/
     shared/                 # optional sign helpers / types
   scripts/
-  docker-compose.yml        # later
+  data/                     # local SQLite (gitignored content)
+  # docker-compose.yml      # later (not in repo yet)
 ```
 
 ---
@@ -191,4 +193,4 @@ Rules:
 
 ## 10. Residual risks
 
-See `findings.md` §7. Main product risk: user expectation of pure personal Alipay without merchant app — mitigated by console copy + docs.
+See `docs/planning/findings.md` §7. Main product risk: user expectation of pure personal Alipay without merchant app — mitigated by console copy + docs.

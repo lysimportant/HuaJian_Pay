@@ -48,3 +48,6 @@ tmp/
 # Accidental tsc emit next to Vue/TS sources
 apps/admin/src/**/*.js
 apps/admin/src/**/*.js.map
+apps/*/dist/
+packages/*/dist/
+.vite/
