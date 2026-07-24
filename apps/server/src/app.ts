@@ -9,6 +9,11 @@ export async function buildApp() {
     },
   });
 
+  app.get("/", async () => ({
+    name: env.appName,
+    docs: "/health",
+  }));
+
   await app.register(healthRoutes);
 
   return app;

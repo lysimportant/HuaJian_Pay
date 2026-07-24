@@ -1,13 +1,21 @@
 import { buildApp } from "./app.js";
 import { env } from "./config/env.js";
+import { initDb } from "./db/index.js";
 
 async function main(): Promise<void> {
+  await initDb();
+
   const app = await buildApp();
 
   try {
     await app.listen({ host: env.host, port: env.port });
     app.log.info(
-      { url: env.appUrl, port: env.port, mode: env.channelMode },
+      {
+        url: env.appUrl,
+        port: env.port,
+        mode: env.channelMode,
+        db: env.dbDriver,
+      },
       `${env.appName} server started`,
     );
   } catch (err) {
