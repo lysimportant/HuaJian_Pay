@@ -146,6 +146,19 @@ Treat as recoverable: provider rate limits (429), gateway/network/DNS failures, 
 - New members must read this file before work.
 - Handoffs must include artifacts, progress, errors, last success, unfinished steps, budget state.
 
+### 4.8.1 Autonomous task dispatch and reporting (mandatory)
+- **Do not ask the user to confirm individual teammate tasks, assignments, wake-ups, replacements, or routine recovery actions.** The user has granted the Lead standing authority to dispatch and adjust work directly.
+- The Lead creates, assigns, sequences, pauses, resumes, reassigns, or replaces teammates as required by the task and these rules, without a separate user approval turn.
+- A member receiving a task must start execution immediately. Do not ask the user for confirmation and do not remain idle while an assigned, unblocked task is incomplete.
+- Members report through `team_send_message` to the **Lead**, not directly to the user.
+- A member must report to the Lead when:
+  1. a meaningful step or the whole task is complete (include files, commit/push hash, tests, residual risks, next breakpoint);
+  2. an error, timeout, network/provider failure, validation failure, merge conflict, or other blocker occurs (include evidence, existing artifacts, last success, retry count, and proposed recovery entry);
+  3. requirements conflict or a decision is needed that cannot be resolved from repository docs or current task context.
+- The Lead reviews each report and decides whether to accept, request fixes, retry from a breakpoint, reassign, sequence dependent work, or escalate a genuine product decision to the user.
+- Routine ACK/status spam is prohibited. Report only completion, concrete progress checkpoints requested by Lead, actionable errors, or clear blockers.
+- Idle notifications are signals for Lead monitoring, not completion. If an unblocked task remains incomplete, the Lead must wake/reassign the member based on actual files, Git state, and test evidence.
+
 ### 4.9 Checklist (every recovery)
 - [ ] Error type recorded?
 - [ ] Treated as recoverable?
