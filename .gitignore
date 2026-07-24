@@ -5,6 +5,8 @@
 *.pem
 *.key
 !*.key.example
+# Allow committed E2E-only WeChat APIv3 RSA fixtures (never production secrets)
+!scripts/fixtures/wechat-apiv3/*.pem
 
 # Local SQLite / runtime data
 data/
