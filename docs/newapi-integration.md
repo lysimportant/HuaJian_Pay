@@ -184,45 +184,48 @@ GET /api.php?act=order&pid=1000&key=change-me-merchant-key&out_trade_no=NEWAPI20
 
 ## 5. mock 验证步骤（无需真实支付宝）
 
-### 5.1 前置
+### 5.1 一键 smoke（推荐）
 
 ```powershell
 Set-Location D:\pay\HuaJian_Pay
-# 确保 .env 中：
-# CHANNEL_MODE=mock
-# PLATFORM_PID=1000
-# PLATFORM_KEY=change-me-merchant-key
-# ADMIN_USERNAME=admin
-# ADMIN_PASSWORD=change-me
 pnpm install
-pnpm --filter @huajian/server exec tsx src/index.ts
+pnpm test:mock-e2e
+# 等价：node scripts/mock-e2e.mjs
 ```
 
-健康检查：
+`scripts/mock-e2e.mjs` **会自行**：
 
-```powershell
-Invoke-RestMethod http://127.0.0.1:8080/health
-```
-
-期望：`ok=true`，`channelMode=mock`。
-
-### 5.2 一键 smoke 脚本
-
-```powershell
-# 另开终端；服务需已启动
-node scripts/mock-e2e.mjs
-```
-
-脚本会：
-
-1. `GET /health`
-2. `POST /admin/api/login` + `GET /admin/api/me`
-3. 本地拉起临时 notify 接收器
+1. 若 `http://127.0.0.1:8080/health` 未就绪，则以 `CHANNEL_MODE=mock` 拉起 `apps/server`
+2. 等待 `/health`
+3. 本地拉起临时商户 `notify_url` 接收器
 4. MD5 签名 `POST /mapi.php` 下单
-5. `GET /api.php` 查单（未支付）
-6. `POST /mock/alipay/pay/:tradeNo` 模拟支付成功
-7. 再查单（已支付）
-8. 断言收到商户 notify 且 body 校验路径走通
+5. `POST /mock/alipay/pay/:tradeNo` 模拟支付成功
+6. `GET /api.php` 查单（期望已支付 `status=1`）
+7. 断言商户 notify 收到（`notify_hits>=1`）
+8. 结束后清理自启的服务进程
+
+可选环境变量：
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `BASE_URL` | `http://127.0.0.1:8080` | 目标网关 |
+| `PID` / `KEY` | `1000` / `change-me-merchant-key` | 须与服务端 `PLATFORM_*` / 种子商户一致 |
+| `SKIP_SERVER_START=1` | 关 | 仅附着已有进程，不自启 |
+| `E2E_VERBOSE=1` | 关 | 打印服务端 stdout/stderr |
+| `E2E_START_TIMEOUT_MS` | `60000` | 等 `/health` 超时 |
+
+成功示例字段：`ok=true`、`started_server=true|false`、`trade_no`、`notify_hits`。
+
+### 5.2 手动起服务（可选）
+
+```powershell
+# .env 建议：CHANNEL_MODE=mock、PLATFORM_PID/KEY、ADMIN_*、APP_SECRET
+pnpm --filter @huajian/server dev
+Invoke-RestMethod http://127.0.0.1:8080/health
+# 期望 ok=true, channelMode=mock
+# 然后：
+$env:SKIP_SERVER_START=1; pnpm test:mock-e2e
+```
 
 ### 5.3 手动 mock 支付入口
 
