@@ -13,7 +13,7 @@ import { URL } from 'node:url'
 
 const BASE = process.env.ADMIN_URL || 'http://127.0.0.1:5173'
 const USER = process.env.ADMIN_USER || 'admin'
-const PASS = process.env.ADMIN_PASS || 'admin123'
+const PASS = process.env.ADMIN_PASS || '12345678'
 const WIDTHS = [1440, 1280, 1024, 768, 390]
 
 const chromeCandidates = [
