@@ -125,21 +125,27 @@ CDN 方案仍可用：只跑 `api`，Admin 静态单独发布。
 
 ## 5. 反向代理（TLS 终止）
 
+Compose **不会**在容器内做 HTTPS。TLS 必须在**主机 Nginx/Caddy** 终止。
+
+当前推荐域名：**`https://pay.sui.lianghj.top`**
+
+- 上游：Compose profile `web` → **`127.0.0.1:8088`**（Admin SPA + 同域反代 API）
+- 首次签证书：`deploy/nginx-host-bootstrap.conf`（仅 HTTP）→ `certbot --nginx -d pay.sui.lianghj.top`
+- 正式 HTTPS：`deploy/nginx-host.conf`（HTTP 跳转 HTTPS + 443 反代）
+- `.env` 中 `APP_URL=https://pay.sui.lianghj.top`；`ADMIN_HOST_BIND=127.0.0.1` 避免 8088 直接暴露公网
+
 ```nginx
-# 推荐：HTTPS 终止后反代 Compose web 入口
+# 主机 Nginx 核心（完整见 deploy/nginx-host.conf）
 location / {
   proxy_pass http://127.0.0.1:8088;
   proxy_set_header Host $host;
-  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Forwarded-Proto https;
   proxy_set_header X-Real-IP $remote_addr;
   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 }
 ```
 
-完整示例：`deploy/nginx-host.conf`。  
 `APP_URL` 与支付 notify/return **必须**为公网 HTTPS。
-
----
 
 ## 6. MySQL（明确未实现）
 

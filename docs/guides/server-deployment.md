@@ -32,17 +32,20 @@
 ## 2. 推荐架构
 
 ```text
-用户 / newapi / 支付宝
+用户 / newapi / 支付宝 / 微信
         │
         ▼
- https://pay.你的域名.com
+ https://pay.sui.lianghj.top
         │
         ▼
-      Nginx（TLS 终止）
+ 主机 Nginx（TLS 终止，443）
+        │
+        ▼
+  Compose profile web → 127.0.0.1:8088
    ┌────┴────┐
    │         │
- Admin静态   反代 API
- dist/       127.0.0.1:8080
+ Admin SPA   反代 API（容器内）
+ nginx静态    api:8080
              │
              ▼
       Docker: HuaJian API
@@ -53,15 +56,15 @@
 
 ### 关键公网 URL
 
-把下面的 `pay.example.com` 换成你的真实域名：
+把下面的 `pay.sui.lianghj.top` 换成你的真实域名：
 
 | 用途 | URL |
 | --- | --- |
-| Admin | `https://pay.example.com/` |
-| 健康检查 | `https://pay.example.com/health` |
-| 支付宝回调 | `https://pay.example.com/channels/alipay/notify` |
-| 微信回调 | `https://pay.example.com/channels/wxpay/notify` |
-| newapi 网关 | `https://pay.example.com/` |
+| Admin | `https://pay.sui.lianghj.top/` |
+| 健康检查 | `https://pay.sui.lianghj.top/health` |
+| 支付宝回调 | `https://pay.sui.lianghj.top/channels/alipay/notify` |
+| 微信回调 | `https://pay.sui.lianghj.top/channels/wxpay/notify` |
+| newapi 网关 | `https://pay.sui.lianghj.top/` |
 
 ---
 
@@ -126,7 +129,7 @@ nano .env   # 或 vim / 面板编辑
 
 ```env
 APP_ENV=production
-APP_URL=https://pay.example.com
+APP_URL=https://pay.sui.lianghj.top
 APP_SECRET=请换成超长随机串
 HOST=0.0.0.0
 PORT=8080
@@ -145,8 +148,8 @@ PLATFORM_KEY=请换成商户强密钥
 ALIPAY_APP_ID=你的APPID
 ALIPAY_PRIVATE_KEY=你的应用私钥完整内容
 ALIPAY_PUBLIC_KEY=支付宝公钥完整内容
-ALIPAY_NOTIFY_URL=https://pay.example.com/channels/alipay/notify
-ALIPAY_RETURN_URL=https://pay.example.com/
+ALIPAY_NOTIFY_URL=https://pay.sui.lianghj.top/channels/alipay/notify
+ALIPAY_RETURN_URL=https://pay.sui.lianghj.top/
 ```
 
 ### 安全要求
@@ -180,7 +183,7 @@ nano .env
 chmod 600 .env
 ```
 
-必改项：`APP_URL`（`https://你的域名`）、`APP_SECRET`、`ADMIN_PASSWORD`、`PLATFORM_KEY`，以及支付宝/微信密钥。生产请将 `CHANNEL_MODE` 设为 `alipay` 或 `wxpay`，不要长期使用 `mock`。
+必改项：`APP_URL`（`https://pay.sui.lianghj.top`）、`APP_SECRET`、`ADMIN_PASSWORD`、`PLATFORM_KEY`，以及支付宝/微信密钥。生产请将 `CHANNEL_MODE` 设为 `alipay` 或 `wxpay`，不要长期使用 `mock`。
 
 ### 6.2 启动 API + Admin Web
 
@@ -256,16 +259,16 @@ deploy/nginx-compose.conf
 ```nginx
 server {
   listen 80;
-  server_name pay.example.com;
+  server_name pay.sui.lianghj.top;
   return 301 https://$host$request_uri;
 }
 
 server {
   listen 443 ssl http2;
-  server_name pay.example.com;
+  server_name pay.sui.lianghj.top;
 
-  # ssl_certificate     /etc/letsencrypt/live/pay.example.com/fullchain.pem;
-  # ssl_certificate_key /etc/letsencrypt/live/pay.example.com/privkey.pem;
+  # ssl_certificate     /etc/letsencrypt/live/pay.sui.lianghj.top/fullchain.pem;
+  # ssl_certificate_key /etc/letsencrypt/live/pay.sui.lianghj.top/privkey.pem;
 
   location / {
     proxy_set_header Host $host;
@@ -280,8 +283,10 @@ server {
 ### 7.2 申请证书
 
 ```bash
-sudo certbot --nginx -d pay.example.com
-curl -sS https://pay.example.com/health
+# 推荐顺序：bootstrap HTTP 反代 → certbot 签证书 → 换成 nginx-host.conf
+# 见 deploy/nginx-host-bootstrap.conf 与 deploy/nginx-host.conf
+sudo certbot --nginx -d pay.sui.lianghj.top
+curl -sS https://pay.sui.lianghj.top/health
 ```
 
 > 若你更习惯宝塔：网站反代目标填 `http://127.0.0.1:8088`，再开强制 HTTPS。
@@ -296,7 +301,7 @@ curl -sS https://pay.example.com/health
 2. 回调地址设为：
 
 ```text
-https://pay.example.com/channels/alipay/notify
+https://pay.sui.lianghj.top/channels/alipay/notify
 ```
 
 3. HuaJian_Pay `.env` 或 Admin → 支付宝通道 填好：
@@ -304,13 +309,13 @@ https://pay.example.com/channels/alipay/notify
    - 应用私钥
    - 支付宝公钥
 4. `CHANNEL_MODE=alipay`
-5. `APP_URL=https://pay.example.com`
+5. `APP_URL=https://pay.sui.lianghj.top`
 
 ### 9.2 newapi
 
 | newapi 配置 | 值 |
 | --- | --- |
-| 易支付接口地址 | `https://pay.example.com/` |
+| 易支付接口地址 | `https://pay.sui.lianghj.top/` |
 | 商户 ID (PID) | `PLATFORM_PID` 或 Admin 商户 pid |
 | 商户密钥 (KEY) | 对应商户 key |
 | 支付方式 | `alipay` 或 `wxpay` |
@@ -371,7 +376,7 @@ docker compose up -d --build
 pnpm install
 pnpm --filter @huajian/admin build
 sudo nginx -t && sudo systemctl reload nginx
-curl -sS https://pay.example.com/health
+curl -sS https://pay.sui.lianghj.top/health
 ```
 
 ---
