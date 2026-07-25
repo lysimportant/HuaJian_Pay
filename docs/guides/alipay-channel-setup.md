@@ -3,7 +3,9 @@
 > **适用版本：** HuaJian_Pay（含标签 **v0.6.0** 及之后主线）  
 > **对照源码：** `apps/server` 通道与 env、`apps/admin` 支付宝配置页、`.env.example`、`README.md`、`docs/api.md`  
 > **图文资产目录：** [`docs/assets/alipay-channel/`](../assets/alipay-channel/)  
-> **Word 版：** [`HuaJian_Pay-支付宝通道配置教程.docx`](./HuaJian_Pay-支付宝通道配置教程.docx)
+> **Word 高清版：** [`点击下载 HuaJian_Pay-支付宝通道配置教程-高清版.docx`](./HuaJian_Pay-支付宝通道配置教程-高清版.docx)
+>
+> **官网快捷入口：** [支付宝开放平台官网](https://open.alipay.com/) · [开放平台文档中心](https://opendocs.alipay.com/) · [开放平台控制台](https://open.alipay.com/develop/manage) · [HuaJian_Pay GitHub](https://github.com/lysimportant/HuaJian_Pay)
 
 ---
 
