@@ -1,468 +1,395 @@
 <script setup lang="ts">
-import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, h, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import type { MenuOption } from 'naive-ui'
 import {
-  NButton,
-  NDrawer,
-  NDrawerContent,
-  NIcon,
   NLayout,
-  NLayoutContent,
-  NLayoutHeader,
   NLayoutSider,
+  NLayoutHeader,
+  NLayoutContent,
   NMenu,
+  NButton,
+  NIcon,
   NSpace,
   NText,
+  NDropdown,
   NTooltip,
+  NAvatar,
   useMessage,
-  type MenuOption,
 } from 'naive-ui'
-import { clearToken, getUsername } from '../utils/auth'
+import {
+  HomeOutline,
+  ReceiptOutline,
+  LogoAlipay,
+  LogoWechat,
+  PeopleOutline,
+  SettingsOutline,
+  PersonCircleOutline,
+  MenuOutline,
+  SunnyOutline,
+  MoonOutline,
+  DesktopOutline,
+  LogOutOutline,
+} from '@vicons/ionicons5'
+import { fetchMe, roleLabel, type MeUser } from '../api/admin'
+import { clearAuth, getUsername } from '../utils/auth'
 import { useTheme } from '../composables/useTheme'
 
-const router = useRouter()
 const route = useRoute()
+const router = useRouter()
 const message = useMessage()
-const username = computed(() => getUsername() || 'admin')
-const { mode, modeLabel, cycleMode, isDark } = useTheme()
-
-const MOBILE_BP = 1024
-const SIDER_WIDTH = 232
-const isMobile = ref(false)
-const mobileOpen = ref(false)
 const collapsed = ref(false)
+const mobileOpen = ref(false)
+const isNarrow = ref(false)
+const me = ref<MeUser | null>(null)
+const { mode, isDark, modeLabel, setMode, toggleLightDark } = useTheme()
 
-function icon(paths: string[]) {
-  return () =>
-    h(
-      NIcon,
-      { size: 18 },
-      {
-        default: () =>
-          h(
-            'svg',
-            {
-              xmlns: 'http://www.w3.org/2000/svg',
-              viewBox: '0 0 24 24',
-              fill: 'none',
-              stroke: 'currentColor',
-              'stroke-width': '1.8',
-              'stroke-linecap': 'round',
-              'stroke-linejoin': 'round',
-            },
-            paths.map((d) => h('path', { d })),
-          ),
-      },
+/** viewer 隐藏写通道/商户；账号管理仅在 Profile 内 gate */
+const canWriteConfig = computed(() => me.value?.role !== 'viewer')
+
+function icon(comp: unknown) {
+  return () => h(NIcon, null, { default: () => h(comp as object) })
+}
+
+const menuOptions = computed<MenuOption[]>(() => {
+  const items: MenuOption[] = [
+    { label: '仪表盘', key: '/dashboard', icon: icon(HomeOutline) },
+    { label: '订单中心', key: '/orders', icon: icon(ReceiptOutline) },
+  ]
+  if (canWriteConfig.value) {
+    items.push(
+      { label: '支付宝通道', key: '/channels/alipay', icon: icon(LogoAlipay) },
+      { label: '微信通道', key: '/channels/wxpay', icon: icon(LogoWechat) },
+      { label: '商户管理', key: '/merchants', icon: icon(PeopleOutline) },
     )
-}
-
-const I = {
-  grid: icon(['M4 4h7v7H4z', 'M13 4h7v7h-7z', 'M4 13h7v7H4z', 'M13 13h7v7h-7z']),
-  list: icon(['M8 6h13', 'M8 12h13', 'M8 18h13', 'M3 6h.01', 'M3 12h.01', 'M3 18h.01']),
-  wallet: icon(['M3 7h18v12H3z', 'M16 12h5', 'M3 7l2-3h14l2 3']),
-  card: icon(['M3 6h18v12H3z', 'M3 10h18']),
-  users: icon([
-    'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2',
-    'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
-    'M22 21v-2a4 4 0 0 0-3-3.87',
-    'M16 3.13a4 4 0 0 1 0 7.75',
-  ]),
-  person: icon([
-    'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2',
-    'M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
-  ]),
-  settings: icon([
-    'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
-    'M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9c.3.6.9 1 1.6 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
-  ]),
-}
-
-const menuOptions: MenuOption[] = [
-  { label: '概览', key: '/dashboard', icon: I.grid },
-  { label: '订单', key: '/orders', icon: I.list },
-  { label: '支付宝', key: '/channels/alipay', icon: I.wallet },
-  { label: '微信支付', key: '/channels/wxpay', icon: I.card },
-  { label: '商户', key: '/merchants', icon: I.users },
-  { label: '个人信息', key: '/profile', icon: I.person },
-  { label: '设置', key: '/settings', icon: I.settings },
-]
+  }
+  items.push({ label: '系统设置', key: '/settings', icon: icon(SettingsOutline) })
+  // 侧栏不出现「个人信息」——仅顶栏账号菜单
+  return items
+})
 
 const activeKey = computed(() => {
-  if (route.path.startsWith('/orders')) return '/orders'
-  if (route.path.startsWith('/channels/wxpay')) return '/channels/wxpay'
-  if (route.path.startsWith('/channels/alipay')) return '/channels/alipay'
-  if (route.path.startsWith('/channels')) return route.path
-  if (route.path.startsWith('/profile')) return '/profile'
-  return route.path
+  const p = route.path
+  if (p.startsWith('/orders')) return '/orders'
+  if (p.startsWith('/channels/alipay')) return '/channels/alipay'
+  if (p.startsWith('/channels/wxpay')) return '/channels/wxpay'
+  if (p.startsWith('/merchants')) return '/merchants'
+  if (p.startsWith('/settings')) return '/settings'
+  if (p.startsWith('/profile')) return '/profile'
+  return '/dashboard'
 })
 
-const pageTitle = computed(() => {
-  const hit = menuOptions.find((m) => m.key === activeKey.value)
-  return String(hit?.label ?? route.meta?.title ?? '运营控制台')
+const displayName = computed(() => {
+  const d = me.value?.display_name?.trim()
+  if (d) return d
+  return me.value?.username || getUsername() || '管理员'
 })
+
+const avatarLetter = computed(() => {
+  const n = displayName.value
+  return n ? n.slice(0, 1).toUpperCase() : 'A'
+})
+
+const themeIcon = computed(() => {
+  if (mode.value === 'system') return DesktopOutline
+  return isDark.value ? MoonOutline : SunnyOutline
+})
+
+const themeTip = computed(() => {
+  if (mode.value === 'system') return '跟随系统（点击切换亮/暗）'
+  return isDark.value ? '深色（点击切换浅色）' : '浅色（点击切换深色）'
+})
+
+const accountOptions = computed(() => [
+  { label: displayName.value, key: 'header', disabled: true },
+  { label: `角色：${roleLabel(me.value?.role)}`, key: 'role', disabled: true },
+  { type: 'divider' as const, key: 'd1' },
+  { label: '个人信息', key: 'profile', icon: icon(PersonCircleOutline) },
+  { label: '退出登录', key: 'logout', icon: icon(LogOutOutline) },
+])
+
+const themeMenuOptions = [
+  { label: '浅色', key: 'light', icon: icon(SunnyOutline) },
+  { label: '深色', key: 'dark', icon: icon(MoonOutline) },
+  { label: '跟随系统', key: 'system', icon: icon(DesktopOutline) },
+]
 
 function onMenuUpdate(key: string) {
   router.push(key)
-  if (isMobile.value) mobileOpen.value = false
+  mobileOpen.value = false
 }
 
-function logout() {
-  clearToken()
-  message.success('已退出登录')
-  router.replace('/login')
+function onAccountSelect(key: string) {
+  if (key === 'profile') router.push('/profile')
+  if (key === 'logout') {
+    clearAuth()
+    message.success('已退出登录')
+    router.replace('/login')
+  }
 }
 
+function onThemeMenuSelect(key: string) {
+  if (key === 'light' || key === 'dark' || key === 'system') setMode(key)
+}
+
+/** Primary click: one-shot light/dark — no dual bind with cycleMode */
 function onThemeClick() {
-  cycleMode()
-  message.success(`主题：${modeLabel.value}`)
+  toggleLightDark()
 }
 
-function syncViewport() {
-  const mobile = window.innerWidth < MOBILE_BP
-  isMobile.value = mobile
-  if (!mobile) {
-    mobileOpen.value = false
-  } else {
-    collapsed.value = false
+function updateNarrow() {
+  isNarrow.value = window.innerWidth < 768
+  if (!isNarrow.value) mobileOpen.value = false
+}
+
+async function loadMe() {
+  try {
+    const res = await fetchMe()
+    if (res?.code === 0 && res.user) me.value = res.user
+  } catch {
+    // layout still usable with local username
   }
 }
 
 onMounted(() => {
-  syncViewport()
-  window.addEventListener('resize', syncViewport, { passive: true })
+  updateNarrow()
+  window.addEventListener('resize', updateNarrow)
+  void loadMe()
 })
-
-onBeforeUnmount(() => {
-  window.removeEventListener('resize', syncViewport)
-})
+onUnmounted(() => window.removeEventListener('resize', updateNarrow))
 
 watch(
   () => route.fullPath,
   () => {
-    if (isMobile.value) mobileOpen.value = false
+    mobileOpen.value = false
   },
 )
 </script>
 
 <template>
-  <NLayout has-sider class="shell" position="absolute">
-    <NLayoutSider
-      v-if="!isMobile"
-      bordered
-      collapse-mode="width"
-      :collapsed="collapsed"
-      :collapsed-width="64"
-      :width="SIDER_WIDTH"
-      show-trigger="bar"
-      :native-scrollbar="false"
-      class="shell-sider"
-      @update:collapsed="(v) => (collapsed = v)"
-    >
-      <div class="brand" :class="{ 'brand--collapsed': collapsed }">
-        <div class="brand-mark" aria-hidden="true">H</div>
-        <div v-if="!collapsed" class="brand-text">
-          <div class="brand-name">花间支付</div>
-          <div class="brand-sub">Admin Console</div>
-        </div>
-      </div>
-      <NMenu
-        :value="activeKey"
-        :options="menuOptions"
-        :collapsed="collapsed"
-        :collapsed-width="64"
-        :collapsed-icon-size="20"
-        :indent="18"
-        @update:value="onMenuUpdate"
-      />
-    </NLayoutSider>
+  <div class="shell" :class="{ 'shell-narrow': isNarrow }">
+    <div v-if="isNarrow && mobileOpen" class="shell-mask" @click="mobileOpen = false" />
 
-    <NDrawer
-      v-model:show="mobileOpen"
-      placement="left"
-      :width="SIDER_WIDTH"
-      :trap-focus="false"
-      display-directive="show"
-    >
-      <NDrawerContent :native-scrollbar="false" body-content-style="padding: 0" title="花间支付">
-        <NMenu
-          :value="activeKey"
-          :options="menuOptions"
-          :indent="18"
-          @update:value="onMenuUpdate"
-        />
-      </NDrawerContent>
-    </NDrawer>
-
-    <NLayout class="shell-main" :native-scrollbar="false">
-      <NLayoutHeader bordered class="shell-header">
-        <div class="header-left">
-          <NButton
-            v-if="isMobile"
-            quaternary
-            circle
-            aria-label="打开导航"
-            @click="mobileOpen = true"
-          >
-            <template #icon>
-              <NIcon :size="20">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                  stroke-linecap="round"
-                >
-                  <path d="M4 6h16M4 12h16M4 18h16" />
-                </svg>
-              </NIcon>
-            </template>
-          </NButton>
-          <div class="header-titles">
-            <NText strong class="header-title">{{ pageTitle }}</NText>
-            <NText depth="3" class="header-hint">运营控制台</NText>
+    <NLayout has-sider class="shell-layout">
+      <NLayoutSider
+        v-show="!isNarrow || mobileOpen"
+        bordered
+        collapse-mode="width"
+        :collapsed-width="isNarrow ? 0 : 72"
+        :width="isNarrow ? 240 : 232"
+        :collapsed="isNarrow ? false : collapsed"
+        :show-trigger="isNarrow ? false : 'bar'"
+        :native-scrollbar="false"
+        class="shell-sider"
+        :class="{ 'shell-sider-drawer': isNarrow }"
+        @collapse="collapsed = true"
+        @expand="collapsed = false"
+      >
+        <div class="brand" :class="{ 'brand-collapsed': !isNarrow && collapsed }">
+          <div class="brand-mark">H</div>
+          <div v-if="isNarrow || !collapsed" class="brand-text">
+            <strong>花间支付</strong>
+            <span>运营控制台</span>
           </div>
         </div>
-        <NSpace align="center" :size="8">
-          <NTooltip>
-            <template #trigger>
-              <NButton quaternary circle :aria-label="`主题 ${modeLabel}`" @click="onThemeClick">
-                <template #icon>
-                  <NIcon :size="18">
-                    <svg
-                      v-if="isDark"
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.8"
-                    >
-                      <path d="M21 14.5A8.5 8.5 0 1 1 9.5 3 7 7 0 0 0 21 14.5z" />
-                    </svg>
-                    <svg
-                      v-else
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.8"
-                    >
-                      <circle cx="12" cy="12" r="4" />
-                      <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
-                    </svg>
-                  </NIcon>
-                </template>
-              </NButton>
-            </template>
-            主题：{{ modeLabel }}（{{ mode }}）
-          </NTooltip>
-          <NButton quaternary @click="router.push('/profile')">
-            <NText depth="3" class="header-user">{{ username }}</NText>
-          </NButton>
-          <NButton quaternary type="primary" @click="logout">
-            <template #icon>
-              <NIcon :size="18">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                  <path d="M16 17l5-5-5-5" />
-                  <path d="M21 12H9" />
-                </svg>
-              </NIcon>
-            </template>
-            退出
-          </NButton>
-        </NSpace>
-      </NLayoutHeader>
+        <NMenu
+          :value="activeKey"
+          :collapsed="!isNarrow && collapsed"
+          :collapsed-width="72"
+          :collapsed-icon-size="20"
+          :options="menuOptions"
+          @update:value="onMenuUpdate"
+        />
+      </NLayoutSider>
 
-      <NLayoutContent
-        class="shell-content"
-        :content-style="{
-          padding: isMobile ? '16px' : '24px',
-          minHeight: 'calc(100vh - var(--hj-header-h))',
-        }"
-      >
-        <div class="page">
-          <router-view v-slot="{ Component, route: r }">
-            <transition name="page-fade" mode="out-in">
-              <div :key="r.fullPath" class="page-view">
+      <NLayout>
+        <NLayoutHeader bordered class="shell-header">
+          <div class="header-left">
+            <NButton
+              v-if="isNarrow"
+              quaternary
+              circle
+              aria-label="打开菜单"
+              @click="mobileOpen = !mobileOpen"
+            >
+              <template #icon>
+                <NIcon :component="MenuOutline" />
+              </template>
+            </NButton>
+            <div>
+              <NText strong>{{ route.meta.title || '控制台' }}</NText>
+              <NText depth="3" class="header-sub">HuaJian Pay Admin</NText>
+            </div>
+          </div>
+          <NSpace align="center" :size="8">
+            <NDropdown
+              trigger="hover"
+              :options="themeMenuOptions"
+              @select="onThemeMenuSelect"
+            >
+              <NTooltip>
+                <template #trigger>
+                  <NButton
+                    quaternary
+                    circle
+                    :aria-label="themeTip"
+                    @click.stop="onThemeClick"
+                  >
+                    <template #icon>
+                      <NIcon :component="themeIcon" />
+                    </template>
+                  </NButton>
+                </template>
+                {{ themeTip }} · 悬停可选跟随系统
+              </NTooltip>
+            </NDropdown>
+
+            <NDropdown
+              trigger="click"
+              :options="accountOptions"
+              @select="onAccountSelect"
+            >
+              <button type="button" class="account-trigger" aria-label="账号菜单">
+                <NAvatar round size="small">{{ avatarLetter }}</NAvatar>
+                <span class="account-name">{{ displayName }}</span>
+              </button>
+            </NDropdown>
+          </NSpace>
+        </NLayoutHeader>
+
+        <NLayoutContent class="shell-content" content-style="padding: 0;">
+          <div class="page-wrap">
+            <router-view v-slot="{ Component }">
+              <transition name="page-fade" mode="out-in">
                 <component :is="Component" />
-              </div>
-            </transition>
-          </router-view>
-        </div>
-      </NLayoutContent>
+              </transition>
+            </router-view>
+          </div>
+        </NLayoutContent>
+      </NLayout>
     </NLayout>
-  </NLayout>
+  </div>
 </template>
 
 <style scoped>
 .shell {
-  inset: 0;
   min-height: 100vh;
-  height: 100vh;
   background: var(--hj-bg-app);
 }
-
+.shell-layout {
+  min-height: 100vh;
+  background: transparent;
+}
 .shell-sider {
-  background: var(--hj-bg-surface) !important;
-  border-right: 1px solid var(--hj-border);
-  flex: 0 0 auto !important;
-  max-width: 232px;
+  background: var(--hj-bg-surface);
 }
-
-.shell-main {
-  flex: 1 1 auto;
-  min-width: 0;
-  background: var(--hj-bg-app);
+.shell-sider-drawer {
+  position: fixed !important;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 40;
+  box-shadow: var(--hj-shadow-elevated);
 }
-
+.shell-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  z-index: 30;
+}
 .brand {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 18px 16px 14px;
-  border-bottom: 1px solid var(--hj-border);
-  margin-bottom: 8px;
-  min-height: 64px;
+  padding: 18px 16px 12px;
+  min-height: 72px;
 }
-
-.brand--collapsed {
+.brand-collapsed {
   justify-content: center;
-  padding-left: 8px;
-  padding-right: 8px;
+  padding-inline: 12px;
 }
-
 .brand-mark {
   width: 36px;
   height: 36px;
-  border-radius: 10px;
+  border-radius: 12px;
   display: grid;
   place-items: center;
   font-weight: 700;
-  font-size: 15px;
   color: #fff;
-  background: linear-gradient(145deg, var(--hj-primary) 0%, #1e3a8a 100%);
-  box-shadow: 0 4px 12px rgb(29 78 216 / 25%);
+  background: linear-gradient(135deg, #2563eb, #0ea5e9);
   flex-shrink: 0;
 }
-
-.brand-name {
-  font-weight: 600;
-  font-size: 15px;
-  color: var(--hj-text);
+.brand-text {
+  display: flex;
+  flex-direction: column;
   line-height: 1.2;
 }
-
-.brand-sub {
-  font-size: 11px;
-  color: var(--hj-text-muted);
-  margin-top: 2px;
+.brand-text strong {
+  font-size: 15px;
+  color: var(--hj-text);
 }
-
+.brand-text span {
+  font-size: 12px;
+  color: var(--hj-text-secondary);
+}
 .shell-header {
-  height: var(--hj-header-h);
+  height: 64px;
+  padding: 0 20px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px 0 20px;
-  background: var(--hj-bg-surface) !important;
-  position: sticky;
-  top: 0;
-  z-index: 10;
+  background: color-mix(in srgb, var(--hj-bg-surface) 92%, transparent);
+  backdrop-filter: blur(10px);
 }
-
 .header-left {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.header-titles {
-  display: flex;
-  align-items: baseline;
   gap: 10px;
-  min-width: 0;
 }
-
-.header-title {
-  font-size: 15px;
-  white-space: nowrap;
-}
-
-.header-hint {
+.header-sub {
+  display: block;
   font-size: 12px;
-  white-space: nowrap;
 }
-
-.header-user {
+.account-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: var(--hj-text);
+}
+.account-trigger:hover {
+  background: var(--hj-primary-soft);
+}
+.account-name {
   font-size: 13px;
   max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
-
-.shell-content {
-  background: var(--hj-bg-app);
-  min-width: 0;
-}
-
-.page {
-  width: 100%;
-  max-width: none;
-  min-width: 0;
-}
-
-.page-view {
-  width: 100%;
-  min-width: 0;
-}
-
-.page-fade-enter-active,
-.page-fade-leave-active {
-  transition:
-    opacity 0.18s ease,
-    transform 0.18s ease;
-}
-
-.page-fade-enter-from {
-  opacity: 0;
-  transform: translateY(6px);
-}
-
-.page-fade-leave-to {
-  opacity: 0;
-  transform: translateY(-4px);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .page-fade-enter-active,
-  .page-fade-leave-active {
-    transition: none;
-  }
-  .page-fade-enter-from,
-  .page-fade-leave-to {
-    transform: none;
-  }
-}
-
-@media (max-width: 1023px) {
-  .header-hint {
+@media (max-width: 480px) {
+  .account-name {
     display: none;
   }
 }
-
-@media (max-width: 480px) {
-  .header-user {
-    max-width: 72px;
+.shell-content {
+  background: transparent;
+}
+.page-wrap {
+  padding: 20px;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+@media (max-width: 767px) {
+  .page-wrap {
+    padding: 14px;
+  }
+  .shell-header {
+    padding: 0 12px;
   }
 }
 </style>

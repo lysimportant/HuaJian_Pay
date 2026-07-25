@@ -1,48 +1,72 @@
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import type { ThemeMode } from '../utils/theme'
 import {
   applyDocumentTheme,
   getStoredThemeMode,
   resolveIsDark,
   setStoredThemeMode,
-  type ThemeMode,
 } from '../utils/theme'
 
 const mode = ref<ThemeMode>(getStoredThemeMode())
 const isDark = ref(resolveIsDark(mode.value))
 
 let media: MediaQueryList | null = null
-let bound = false
+let mediaHandler: (() => void) | null = null
+let watchersReady = false
 
 function syncFromMode() {
-  isDark.value = resolveIsDark(mode.value)
-  applyDocumentTheme(isDark.value)
+  const dark = resolveIsDark(mode.value)
+  applyDocumentTheme(dark)
+  isDark.value = dark
 }
 
-function onMediaChange() {
-  if (mode.value === 'system') syncFromMode()
+function ensureWatchers() {
+  if (watchersReady) return
+  watchersReady = true
+
+  watch(
+    mode,
+    (m) => {
+      setStoredThemeMode(m)
+      syncFromMode()
+    },
+    { immediate: true },
+  )
+
+  if (typeof window !== 'undefined') {
+    media = window.matchMedia('(prefers-color-scheme: dark)')
+    mediaHandler = () => {
+      if (mode.value === 'system') syncFromMode()
+    }
+    media.addEventListener('change', mediaHandler)
+  }
 }
 
 export function useTheme() {
   onMounted(() => {
-    if (!bound && typeof window !== 'undefined' && window.matchMedia) {
-      media = window.matchMedia('(prefers-color-scheme: dark)')
-      media.addEventListener?.('change', onMediaChange)
-      bound = true
-    }
+    ensureWatchers()
+    mode.value = getStoredThemeMode()
     syncFromMode()
   })
 
-  onBeforeUnmount(() => {
-    // keep global listener for app lifetime; no-op
+  onUnmounted(() => {
+    // keep global media listener for other consumers
   })
 
-  watch(mode, (m) => {
-    setStoredThemeMode(m)
-    syncFromMode()
-  })
+  ensureWatchers()
 
   function setMode(next: ThemeMode) {
+    if (mode.value === next) {
+      syncFromMode()
+      return
+    }
     mode.value = next
+  }
+
+  /** Single-click light <-> dark (from system uses currently resolved appearance). */
+  function toggleLightDark() {
+    const currentlyDark = resolveIsDark(mode.value)
+    setMode(currentlyDark ? 'light' : 'dark')
   }
 
   function cycleMode() {
@@ -62,11 +86,7 @@ export function useTheme() {
     isDark,
     modeLabel,
     setMode,
+    toggleLightDark,
     cycleMode,
   }
-}
-
-// Apply once on module load for first paint
-if (typeof document !== 'undefined') {
-  applyDocumentTheme(resolveIsDark(getStoredThemeMode()))
 }

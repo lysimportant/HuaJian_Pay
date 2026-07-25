@@ -7,6 +7,7 @@ export type MeUser = {
   username: string
   role: string
   display_name: string | null
+  status?: string
   created_at: string | null
   last_login_at: string | null
 }
@@ -19,6 +20,12 @@ export type AdminUserRow = {
   status: string
   created_at: string | null
   last_login_at: string | null
+}
+
+export type AdminUserListQuery = {
+  keyword?: string
+  role?: string
+  status?: string
 }
 
 export function login(username: string, password: string) {
@@ -77,7 +84,7 @@ export function updateMe(body: { display_name?: string | null }) {
   return api.put('/me', body) as Promise<ApiOk<{ user: MeUser }>>
 }
 
-/** PUT /admin/api/me/password */
+/** PUT /admin/api/me/password — current_password (server also accepts old_password) */
 export function changeMyPassword(body: {
   current_password: string
   new_password: string
@@ -87,17 +94,23 @@ export function changeMyPassword(body: {
   >
 }
 
-/** GET /admin/api/admin-users */
-export function listAdminUsers() {
-  return api.get('/admin-users') as Promise<ApiOk<{ list: AdminUserRow[] }>>
+/** GET /admin/api/admin-users?keyword&role&status */
+export function listAdminUsers(params?: AdminUserListQuery) {
+  const q: Record<string, string> = {}
+  if (params?.keyword?.trim()) q.keyword = params.keyword.trim()
+  if (params?.role && params.role !== 'all') q.role = params.role
+  if (params?.status && params.status !== 'all') q.status = params.status
+  return api.get('/admin-users', { params: q }) as Promise<
+    ApiOk<{ list: AdminUserRow[] }>
+  >
 }
 
-/** POST /admin/api/admin-users */
+/** POST /admin/api/admin-users — role only admin | viewer */
 export function createAdminUser(body: {
   username: string
   password: string
   display_name?: string
-  role?: string
+  role?: 'admin' | 'viewer'
 }) {
   return api.post('/admin-users', body) as Promise<ApiOk<{ user: AdminUserRow }>>
 }
@@ -109,10 +122,39 @@ export function patchAdminUser(
     display_name?: string | null
     password?: string
     status?: 'active' | 'disabled'
-    role?: string
+    role?: 'admin' | 'viewer'
   },
 ) {
   return api.patch(`/admin-users/${id}`, body) as Promise<
     ApiOk<{ user: AdminUserRow }>
   >
+}
+
+/** DELETE /admin/api/admin-users/:id */
+export function deleteAdminUser(id: number) {
+  return api.delete(`/admin-users/${id}`) as Promise<ApiOk>
+}
+
+export function roleLabel(role: string | undefined | null): string {
+  switch (role) {
+    case 'admin':
+      return '管理员'
+    case 'viewer':
+      return '普通用户'
+    case 'super_admin':
+      return '超级管理员'
+    default:
+      return role || '—'
+  }
+}
+
+export function adminStatusLabel(status: string | undefined | null): string {
+  switch (status) {
+    case 'active':
+      return '启用'
+    case 'disabled':
+      return '禁用'
+    default:
+      return status || '—'
+  }
 }

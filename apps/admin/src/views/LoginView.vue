@@ -9,9 +9,10 @@ import { pickMsg } from '../utils/format'
 const router = useRouter()
 const message = useMessage()
 const loading = ref(false)
-const form = reactive({ username: 'admin', password: 'admin123' })
+const form = reactive({ username: 'admin', password: '' })
 
 async function submit() {
+  if (loading.value) return
   if (!form.username || !form.password) {
     message.warning('请输入用户名和密码')
     return
@@ -19,13 +20,22 @@ async function submit() {
   loading.value = true
   try {
     const res = await login(form.username, form.password)
+    if (res && typeof res.code === 'number' && res.code !== 0) {
+      message.error(res.msg || '登录失败')
+      return
+    }
     const token = res?.token || res?.data?.token || res?.access_token
-    const username = res?.username || res?.data?.username || form.username
-    if (!token) throw new Error('登录响应缺少 token')
+    const username =
+      res?.user?.username || res?.username || res?.data?.username || form.username
+    if (!token) {
+      message.error(res?.msg || '登录失败')
+      return
+    }
     setAuth(String(token), String(username))
     message.success('登录成功')
     router.replace('/dashboard')
   } catch (e) {
+    // Single toast with accurate server msg (e.g. 用户名或密码错误)
     message.error(pickMsg(e, '登录失败'))
   } finally {
     loading.value = false
@@ -44,25 +54,39 @@ async function submit() {
           <p>运营控制台登录</p>
         </div>
       </div>
-      <NForm @submit.prevent="submit">
-        <NFormItem label="用户名">
-          <NInput v-model:value="form.username" placeholder="admin" autocomplete="username" />
+      <NText depth="3" class="login-hint">
+        使用管理员账号登录。密码错误时显示服务端返回的准确提示。
+      </NText>
+      <NForm :model="form" size="large" @submit.prevent="submit">
+        <NFormItem label="用户名" path="username">
+          <NInput
+            v-model:value="form.username"
+            autocomplete="username"
+            placeholder="请输入用户名"
+            @keyup.enter="submit"
+          />
         </NFormItem>
-        <NFormItem label="密码">
+        <NFormItem label="密码" path="password">
           <NInput
             v-model:value="form.password"
             type="password"
             show-password-on="click"
-            placeholder="密码"
             autocomplete="current-password"
+            placeholder="请输入密码"
             @keyup.enter="submit"
           />
         </NFormItem>
-        <NButton type="primary" block :loading="loading" attr-type="submit" class="login-btn" @click="submit">
+        <NButton
+          type="primary"
+          block
+          :loading="loading"
+          :disabled="loading"
+          attr-type="submit"
+          class="login-btn"
+        >
           登录
         </NButton>
       </NForm>
-      <NText depth="3" class="login-tip">默认账号见部署文档，生产环境请立即修改密码</NText>
     </NCard>
   </div>
 </template>
@@ -77,67 +101,55 @@ async function submit() {
   overflow: hidden;
   background: var(--hj-bg-app);
 }
-
 .login-bg {
   position: absolute;
-  inset: 0;
+  inset: -20%;
   background:
-    radial-gradient(900px 400px at 10% -10%, rgb(29 78 216 / 14%), transparent 55%),
-    radial-gradient(700px 360px at 100% 0%, rgb(15 118 110 / 10%), transparent 50%),
-    var(--hj-bg-app);
+    radial-gradient(circle at 20% 20%, rgba(37, 99, 235, 0.18), transparent 40%),
+    radial-gradient(circle at 80% 30%, rgba(14, 165, 233, 0.16), transparent 36%),
+    radial-gradient(circle at 50% 80%, rgba(99, 102, 241, 0.12), transparent 40%);
   pointer-events: none;
 }
-
 .login-card {
-  width: 100%;
-  max-width: 400px;
+  width: min(420px, 100%);
   position: relative;
-  border-radius: 16px !important;
-  box-shadow: var(--hj-shadow-elevated) !important;
+  z-index: 1;
+  border-radius: 18px;
+  box-shadow: var(--hj-shadow-elevated);
 }
-
 .login-brand {
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin-bottom: 24px;
+  gap: 12px;
+  margin-bottom: 8px;
 }
-
 .login-mark {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
   display: grid;
   place-items: center;
   font-weight: 700;
   color: #fff;
-  background: linear-gradient(145deg, var(--hj-primary), #1e3a8a);
-  box-shadow: 0 6px 16px rgb(29 78 216 / 28%);
+  background: linear-gradient(135deg, #2563eb, #0ea5e9);
 }
-
 .login-brand h1 {
   margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--hj-text);
+  font-size: 22px;
+  line-height: 1.2;
 }
-
 .login-brand p {
-  margin: 4px 0 0;
+  margin: 2px 0 0;
+  color: var(--hj-text-secondary);
   font-size: 13px;
-  color: var(--hj-text-muted);
 }
-
+.login-hint {
+  display: block;
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.5;
+}
 .login-btn {
   margin-top: 4px;
-  height: 40px;
-  font-weight: 600;
-}
-
-.login-tip {
-  display: block;
-  margin-top: 16px;
-  font-size: 12px;
-  line-height: 1.5;
 }
 </style>

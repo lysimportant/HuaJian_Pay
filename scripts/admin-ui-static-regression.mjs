@@ -68,7 +68,15 @@ assert(
     profile.includes("new_password"),
   "password fields",
 );
-pass("ProfileView: me + password + message");
+assert(
+  profile.includes("canManageUsers") &&
+    profile.includes("deleteAdminUser") &&
+    profile.includes("patchAdminUser") &&
+    (profile.includes("keyword") || profile.includes("filters")),
+  "Profile account CRUD + viewer gate",
+);
+assert(profile.includes("viewer") || profile.includes("admin"), "role options include viewer");
+pass("ProfileView: me + password + message + user CRUD");
 
 // —— Theme ——
 const theme = read("composables/useTheme.ts");
@@ -88,8 +96,22 @@ assert(
   layout.includes("<router-view") || layout.includes("<RouterView"),
   "router-view in layout",
 );
-assert(layout.includes("useTheme") || layout.includes("cycleMode"), "layout theme control");
-pass("AdminLayout route animation / router-view / theme");
+assert(
+  layout.includes("useTheme") &&
+    (layout.includes("cycleMode") ||
+      layout.includes("toggleLightDark") ||
+      layout.includes("setMode")),
+  "layout theme control",
+);
+assert(
+  layout.includes("accountOptions") || layout.includes("/profile"),
+  "topbar account entry to profile",
+);
+assert(
+  layout.includes("canWriteConfig") || layout.includes("viewer"),
+  "viewer write-channel gate",
+);
+pass("AdminLayout route animation / router-view / theme / profile entry");
 
 // —— KPI ——
 const dash = read("views/DashboardView.vue");

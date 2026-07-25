@@ -27,6 +27,11 @@ export function clearToken(): void {
   localStorage.removeItem(USER_KEY)
 }
 
+/** Alias used by layout/profile logout flows */
+export function clearAuth(): void {
+  clearToken()
+}
+
 export function logoutAndRedirect(): void {
   clearToken()
   if (location.pathname !== '/login') {
