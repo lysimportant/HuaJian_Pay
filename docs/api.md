@@ -107,21 +107,60 @@ Retry with backoff on failure; persist attempts.
 
 ---
 
-## 6. Admin API (skeleton, session auth)
+## 6. Admin API (Bearer HMAC token)
+
+Auth: `Authorization: Bearer <token>` after login. Token is HMAC-SHA256 over JSON payload
+`{ sub, username, role, tv, exp }` signed with `APP_SECRET` (12h). Field **`tv`** =
+`admin_users.token_version` at issue time; each request reloads the user and rejects if
+status ≠ `active` or `tv` mismatch (password change / disable / reset-password).
+
+**Never returned:** `password_hash`, raw secrets, full channel keys.
+
+### 6.1 Auth & profile
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| POST | `/admin/api/login` | Login |
-| POST | `/admin/api/logout` | Logout |
-| GET | `/admin/api/me` | Current admin |
+| POST | `/admin/api/login` | Body `{ username, password }` → `{ token, user }` (public user only) |
+| GET | `/admin/api/me` | Current user profile |
+| PUT | `/admin/api/me` | Update `display_name` and/or `username` (unique) |
+| PUT | `/admin/api/me/password` | Body `{ old_password, new_password }` (≥8 chars); bumps `token_version`; returns **new** `token` |
+
+Public user JSON:
+
+```json
+{
+  "id": 1,
+  "username": "admin",
+  "display_name": "Administrator",
+  "role": "admin",
+  "status": "active",
+  "created_at": 0,
+  "updated_at": 0
+}
+```
+
+### 6.2 Multi-admin users (role=`admin` only)
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/admin/api/admin-users` | List users (no hashes) |
+| POST | `/admin/api/admin-users` | Create `{ username, password, display_name?, role? }` |
+| PATCH | `/admin/api/admin-users/:id` | Update `display_name` / `role` / `status`; cannot disable or demote **last active admin**; disable bumps `token_version` |
+| POST | `/admin/api/admin-users/:id/reset-password` | Body `{ new_password }`; bumps `token_version`; no password echo |
+
+### 6.3 Orders / channels / merchants
+
+| Method | Path | Purpose |
+| --- | --- | --- |
 | GET | `/admin/api/orders` | List/filter orders |
 | GET | `/admin/api/orders/:tradeNo` | Detail + notify logs |
 | GET/PUT | `/admin/api/channels/alipay` | Alipay config (GET never echoes secrets; PUT empty = preserve) |
-| GET/PUT | `/admin/api/channels/wxpay` | WeChat APIv3 config (GET never echoes api_v3_key/private_key/platform_public_key; PUT empty secret = preserve); see `docs/wechat-pay.md` |
-| GET | `/admin/api/merchants` | Merchant list (MVP may be single) |
+| GET/PUT | `/admin/api/channels/wxpay` | WeChat APIv3 config (GET never echoes secrets; PUT empty = preserve) |
+| GET | `/admin/api/merchants` | Merchant list |
 | POST | `/admin/api/merchants` | Create merchant / rotate key |
 
-All admin mutations require auth.
+All admin mutations require auth. `viewer` role can login and use profile/orders/read paths
+as currently gated by `requireAdmin`; user-management routes require `role=admin`.
 
 ---
 

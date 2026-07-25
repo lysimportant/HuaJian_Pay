@@ -48,7 +48,10 @@ export async function seed(db: Db): Promise<void> {
     await db.insert(adminUsers).values({
       username: env.adminUsername,
       passwordHash: hashPassword(env.adminPassword),
+      displayName: "Administrator",
       role: "admin",
+      status: "active",
+      tokenVersion: 0,
       createdAt: now,
       updatedAt: now,
     });

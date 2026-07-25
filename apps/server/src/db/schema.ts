@@ -124,7 +124,17 @@ export const adminUsers = sqliteTable(
     id: integer("id").primaryKey({ autoIncrement: true }),
     username: text("username").notNull(),
     passwordHash: text("password_hash").notNull(),
+    /** Display name for UI; optional. */
+    displayName: text("display_name").notNull().default(""),
     role: text("role", { enum: ["admin", "viewer"] }).notNull().default("admin"),
+    status: text("status", { enum: ["active", "disabled"] })
+      .notNull()
+      .default("active"),
+    /**
+     * Bumped on password change / forced logout so existing Bearer tokens fail.
+     * Embedded in token as `tv` and checked against DB on each request.
+     */
+    tokenVersion: integer("token_version").notNull().default(0),
     createdAt: ts("created_at"),
     updatedAt: ts("updated_at"),
   },

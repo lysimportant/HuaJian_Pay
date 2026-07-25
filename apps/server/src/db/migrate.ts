@@ -72,11 +72,22 @@ CREATE TABLE IF NOT EXISTS admin_users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT NOT NULL,
   password_hash TEXT NOT NULL,
+  display_name TEXT NOT NULL DEFAULT '',
   role TEXT NOT NULL DEFAULT 'admin',
+  status TEXT NOT NULL DEFAULT 'active',
+  token_version INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL DEFAULT (cast(strftime('%s','now') as integer) * 1000),
   updated_at INTEGER NOT NULL DEFAULT (cast(strftime('%s','now') as integer) * 1000)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS admin_users_username_uq ON admin_users(username);
+`,
+  },
+  {
+    id: "0002_admin_users_profile",
+    sql: `
+ALTER TABLE admin_users ADD COLUMN display_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE admin_users ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
+ALTER TABLE admin_users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0;
 `,
   },
 ];
@@ -96,7 +107,26 @@ export async function migrate(client: Client): Promise<void> {
     });
     if (existing.rows.length > 0) continue;
 
-    await client.executeMultiple(m.sql);
+    // SQLite cannot ADD COLUMN that already exists; apply statements one-by-one
+    // and ignore duplicate-column errors so re-runs / partial applies stay safe.
+    const statements = m.sql
+      .split(";")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0 && !s.startsWith("--"));
+    for (const stmt of statements) {
+      try {
+        await client.execute(stmt);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (
+          /duplicate column name/i.test(msg) ||
+          /already exists/i.test(msg)
+        ) {
+          continue;
+        }
+        throw err;
+      }
+    }
     await client.execute({
       sql: "INSERT INTO __migrations (id) VALUES (?)",
       args: [m.id],

@@ -1,10 +1,11 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { env } from "../config/env.js";
 import {
   channelConfigs,
   getDb,
+  hashPassword,
   merchants,
   notifyAttempts,
   orders,
@@ -18,8 +19,56 @@ type SessionPayload = {
   sub: number;
   username: string;
   role: string;
+  /** token_version at issue time; must match DB or token is revoked */
+  tv: number;
   exp: number;
 };
+
+type PublicAdminUser = {
+  id: number;
+  username: string;
+  display_name: string;
+  role: string;
+  status: string;
+  created_at: number;
+  updated_at: number;
+};
+
+const PASSWORD_MIN = 8;
+
+function toPublicAdminUser(u: {
+  id: number;
+  username: string;
+  displayName: string;
+  role: string;
+  status: string;
+  createdAt: number;
+  updatedAt: number;
+}): PublicAdminUser {
+  return {
+    id: u.id,
+    username: u.username,
+    display_name: u.displayName || "",
+    role: u.role,
+    status: u.status,
+    created_at: u.createdAt,
+    updated_at: u.updatedAt,
+  };
+}
+
+function validatePasswordPolicy(password: string): string | null {
+  if (password.length < PASSWORD_MIN) {
+    return `password must be at least ${PASSWORD_MIN} characters`;
+  }
+  return null;
+}
+
+function validateUsername(username: string): string | null {
+  if (!/^[a-zA-Z0-9_]{3,32}$/.test(username)) {
+    return "username must be 3-32 chars [a-zA-Z0-9_]";
+  }
+  return null;
+}
 
 function b64url(input: Buffer | string): string {
   return Buffer.from(input)
@@ -81,7 +130,46 @@ async function requireAdmin(req: FastifyRequest, reply: FastifyReply) {
     reply.code(401).send({ code: 401, msg: "unauthorized" });
     return null;
   }
-  return session;
+
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(adminUsers)
+    .where(eq(adminUsers.id, session.sub))
+    .limit(1);
+  const user = rows[0];
+  if (!user || user.status !== "active") {
+    reply.code(401).send({ code: 401, msg: "unauthorized" });
+    return null;
+  }
+  // Missing tv (legacy tokens) or mismatched version → force re-login
+  if (typeof session.tv !== "number" || session.tv !== user.tokenVersion) {
+    reply.code(401).send({ code: 401, msg: "token revoked" });
+    return null;
+  }
+  // Flat shape keeps existing call sites (`session.sub`) working
+  return { ...session, user };
+}
+
+async function requireSuperAdmin(req: FastifyRequest, reply: FastifyReply) {
+  const ctx = await requireAdmin(req, reply);
+  if (!ctx) return null;
+  if (ctx.user.role !== "admin") {
+    reply.code(403).send({ code: 403, msg: "admin role required" });
+    return null;
+  }
+  return ctx;
+}
+
+async function countActiveAdmins(): Promise<number> {
+  const db = getDb();
+  const rows = await db
+    .select({ c: sql<number>`count(*)` })
+    .from(adminUsers)
+    .where(
+      and(eq(adminUsers.role, "admin"), eq(adminUsers.status, "active")),
+    );
+  return Number(rows[0]?.c ?? 0);
 }
 
 function maskKey(key: string): string {
@@ -152,11 +240,15 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (!user || !verifyPassword(password, user.passwordHash)) {
       return reply.code(401).send({ code: 401, msg: "invalid credentials" });
     }
+    if (user.status !== "active") {
+      return reply.code(403).send({ code: 403, msg: "account disabled" });
+    }
 
     const token = signToken({
       sub: user.id,
       username: user.username,
       role: user.role,
+      tv: user.tokenVersion ?? 0,
       exp: Date.now() + 12 * 60 * 60 * 1000,
     });
 
@@ -164,24 +256,348 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       code: 0,
       msg: "ok",
       token,
-      user: { id: user.id, username: user.username, role: user.role },
+      user: toPublicAdminUser({
+        id: user.id,
+        username: user.username,
+        displayName: user.displayName ?? "",
+        role: user.role,
+        status: user.status ?? "active",
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+      }),
     };
   });
 
-  app.post("/admin/api/logout", async () => ({ code: 0, msg: "ok" }));
-
+  // —— Current admin profile ——
   app.get("/admin/api/me", async (req, reply) => {
     const session = await requireAdmin(req, reply);
     if (!session) return;
+    return { code: 0, user: toPublicAdminUser(session.user) };
+  });
+
+  app.put("/admin/api/me", async (req, reply) => {
+    const session = await requireAdmin(req, reply);
+    if (!session) return;
+    const body = (req.body ?? {}) as {
+      display_name?: string;
+      username?: string;
+    };
+    const db = getDb();
+    const patch: {
+      displayName?: string;
+      username?: string;
+      updatedAt: number;
+    } = { updatedAt: Date.now() };
+
+    if (body.display_name !== undefined) {
+      const dn = String(body.display_name).trim();
+      if (dn.length > 64) {
+        return reply.code(400).send({ code: 400, msg: "display_name too long" });
+      }
+      patch.displayName = dn;
+    }
+
+    if (body.username !== undefined) {
+      const un = String(body.username).trim();
+      const err = validateUsername(un);
+      if (err) return reply.code(400).send({ code: 400, msg: err });
+      if (un !== session.user.username) {
+        const clash = await db
+          .select({ id: adminUsers.id })
+          .from(adminUsers)
+          .where(eq(adminUsers.username, un))
+          .limit(1);
+        if (clash.length > 0) {
+          return reply.code(409).send({ code: 409, msg: "username already taken" });
+        }
+        patch.username = un;
+      }
+    }
+
+    const updated = await db
+      .update(adminUsers)
+      .set(patch)
+      .where(eq(adminUsers.id, session.user.id))
+      .returning();
+    const u = updated[0];
+    return { code: 0, msg: "ok", user: toPublicAdminUser(u) };
+  });
+
+  app.put("/admin/api/me/password", async (req, reply) => {
+    const session = await requireAdmin(req, reply);
+    if (!session) return;
+    const body = (req.body ?? {}) as {
+      old_password?: string;
+      new_password?: string;
+    };
+    const oldPassword = body.old_password || "";
+    const newPassword = body.new_password || "";
+    if (!oldPassword || !newPassword) {
+      return reply
+        .code(400)
+        .send({ code: 400, msg: "old_password and new_password required" });
+    }
+    if (!verifyPassword(oldPassword, session.user.passwordHash)) {
+      return reply.code(401).send({ code: 401, msg: "old password incorrect" });
+    }
+    const pol = validatePasswordPolicy(newPassword);
+    if (pol) return reply.code(400).send({ code: 400, msg: pol });
+    if (oldPassword === newPassword) {
+      return reply
+        .code(400)
+        .send({ code: 400, msg: "new password must differ from old password" });
+    }
+
+    const db = getDb();
+    const now = Date.now();
+    const nextTv = (session.user.tokenVersion ?? 0) + 1;
+    const updated = await db
+      .update(adminUsers)
+      .set({
+        passwordHash: hashPassword(newPassword),
+        tokenVersion: nextTv,
+        updatedAt: now,
+      })
+      .where(eq(adminUsers.id, session.user.id))
+      .returning();
+
+    const token = signToken({
+      sub: updated[0].id,
+      username: updated[0].username,
+      role: updated[0].role,
+      tv: nextTv,
+      exp: now + 12 * 60 * 60 * 1000,
+    });
     return {
       code: 0,
-      user: {
-        id: session.sub,
-        username: session.username,
-        role: session.role,
-      },
+      msg: "ok",
+      token,
+      user: toPublicAdminUser(updated[0]),
     };
   });
+
+  // —— Multi-admin user management (role=admin only) ——
+  app.get("/admin/api/admin-users", async (req, reply) => {
+    const session = await requireSuperAdmin(req, reply);
+    if (!session) return;
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(adminUsers)
+      .orderBy(desc(adminUsers.id));
+    return {
+      code: 0,
+      list: rows.map((u) => toPublicAdminUser(u)),
+    };
+  });
+
+  app.post("/admin/api/admin-users", async (req, reply) => {
+    const session = await requireSuperAdmin(req, reply);
+    if (!session) return;
+    const body = (req.body ?? {}) as {
+      username?: string;
+      password?: string;
+      display_name?: string;
+      role?: string;
+    };
+    const username = (body.username || "").trim();
+    const password = body.password || "";
+    const displayName = String(body.display_name ?? "").trim();
+    const role = body.role === "viewer" ? "viewer" : "admin";
+
+    const uerr = validateUsername(username);
+    if (uerr) return reply.code(400).send({ code: 400, msg: uerr });
+    const perr = validatePasswordPolicy(password);
+    if (perr) return reply.code(400).send({ code: 400, msg: perr });
+    if (displayName.length > 64) {
+      return reply.code(400).send({ code: 400, msg: "display_name too long" });
+    }
+
+    const db = getDb();
+    const clash = await db
+      .select({ id: adminUsers.id })
+      .from(adminUsers)
+      .where(eq(adminUsers.username, username))
+      .limit(1);
+    if (clash.length > 0) {
+      return reply.code(409).send({ code: 409, msg: "username already taken" });
+    }
+
+    const now = Date.now();
+    try {
+      const inserted = await db
+        .insert(adminUsers)
+        .values({
+          username,
+          passwordHash: hashPassword(password),
+          displayName,
+          role,
+          status: "active",
+          tokenVersion: 0,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning();
+      return {
+        code: 0,
+        msg: "ok",
+        user: toPublicAdminUser(inserted[0]),
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/unique/i.test(msg)) {
+        return reply.code(409).send({ code: 409, msg: "username already taken" });
+      }
+      throw err;
+    }
+  });
+
+  app.patch("/admin/api/admin-users/:id", async (req, reply) => {
+    const session = await requireSuperAdmin(req, reply);
+    if (!session) return;
+    const id = Number((req.params as { id?: string }).id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return reply.code(400).send({ code: 400, msg: "invalid id" });
+    }
+    const body = (req.body ?? {}) as {
+      display_name?: string;
+      role?: string;
+      status?: string;
+    };
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(adminUsers)
+      .where(eq(adminUsers.id, id))
+      .limit(1);
+    const target = rows[0];
+    if (!target) {
+      return reply.code(404).send({ code: 404, msg: "user not found" });
+    }
+
+    const patch: {
+      displayName?: string;
+      role?: "admin" | "viewer";
+      status?: "active" | "disabled";
+      tokenVersion?: number;
+      updatedAt: number;
+    } = { updatedAt: Date.now() };
+
+    if (body.display_name !== undefined) {
+      const dn = String(body.display_name).trim();
+      if (dn.length > 64) {
+        return reply.code(400).send({ code: 400, msg: "display_name too long" });
+      }
+      patch.displayName = dn;
+    }
+    if (body.role !== undefined) {
+      if (body.role !== "admin" && body.role !== "viewer") {
+        return reply.code(400).send({ code: 400, msg: "role must be admin|viewer" });
+      }
+      patch.role = body.role;
+    }
+    if (body.status !== undefined) {
+      if (body.status !== "active" && body.status !== "disabled") {
+        return reply
+          .code(400)
+          .send({ code: 400, msg: "status must be active|disabled" });
+      }
+      // Cannot disable the last active admin
+      if (
+        body.status === "disabled" &&
+        target.status === "active" &&
+        target.role === "admin"
+      ) {
+        const activeAdmins = await countActiveAdmins();
+        if (activeAdmins <= 1) {
+          return reply.code(400).send({
+            code: 400,
+            msg: "cannot disable the last active admin",
+          });
+        }
+      }
+      // Demoting last admin also blocked
+      if (
+        body.role === "viewer" &&
+        target.role === "admin" &&
+        target.status === "active"
+      ) {
+        const activeAdmins = await countActiveAdmins();
+        if (activeAdmins <= 1) {
+          return reply.code(400).send({
+            code: 400,
+            msg: "cannot demote the last active admin",
+          });
+        }
+      }
+      patch.status = body.status;
+      // Disable → bump token version so sessions die
+      if (body.status === "disabled") {
+        patch.tokenVersion = (target.tokenVersion ?? 0) + 1;
+      }
+    }
+
+    // Separate check if only role demotion without status in body
+    if (
+      body.role === "viewer" &&
+      target.role === "admin" &&
+      target.status === "active" &&
+      body.status === undefined
+    ) {
+      const activeAdmins = await countActiveAdmins();
+      if (activeAdmins <= 1) {
+        return reply.code(400).send({
+          code: 400,
+          msg: "cannot demote the last active admin",
+        });
+      }
+    }
+
+    const updated = await db
+      .update(adminUsers)
+      .set(patch)
+      .where(eq(adminUsers.id, id))
+      .returning();
+    return { code: 0, msg: "ok", user: toPublicAdminUser(updated[0]) };
+  });
+
+  app.post("/admin/api/admin-users/:id/reset-password", async (req, reply) => {
+    const session = await requireSuperAdmin(req, reply);
+    if (!session) return;
+    const id = Number((req.params as { id?: string }).id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return reply.code(400).send({ code: 400, msg: "invalid id" });
+    }
+    const body = (req.body ?? {}) as { new_password?: string };
+    const newPassword = body.new_password || "";
+    const pol = validatePasswordPolicy(newPassword);
+    if (pol) return reply.code(400).send({ code: 400, msg: pol });
+
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(adminUsers)
+      .where(eq(adminUsers.id, id))
+      .limit(1);
+    if (!rows[0]) {
+      return reply.code(404).send({ code: 404, msg: "user not found" });
+    }
+    const now = Date.now();
+    const nextTv = (rows[0].tokenVersion ?? 0) + 1;
+    const updated = await db
+      .update(adminUsers)
+      .set({
+        passwordHash: hashPassword(newPassword),
+        tokenVersion: nextTv,
+        updatedAt: now,
+      })
+      .where(eq(adminUsers.id, id))
+      .returning();
+    // Never return the password; only public user fields
+    return { code: 0, msg: "ok", user: toPublicAdminUser(updated[0]) };
+  });
+
+  app.post("/admin/api/logout", async () => ({ code: 0, msg: "ok" }));
 
   app.get("/admin/api/orders", async (req, reply) => {
     const session = await requireAdmin(req, reply);
