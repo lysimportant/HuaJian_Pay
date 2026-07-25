@@ -1,6 +1,6 @@
 # HuaJian_Pay - API only (recommended production)
 #
-#   cp .env.production.example .env
+#   cp .env.production.example .env   # or: cp deploy/env.production.example .env
 #   # edit APP_URL / secrets / channel keys
 #   docker compose up -d --build
 #   curl http://127.0.0.1:8080/health
