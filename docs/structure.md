@@ -29,6 +29,8 @@ HuaJian_Pay/
 │   ├── newapi-integration.md
 │   ├── wechat-pay.md         # WeChat APIv3 deploy / certs / wxpay
 │   ├── security-checklist.md
+│   ├── guides/               # 图文教程 MD + Word
+│   ├── assets/               # 教程图片（如 alipay-channel/）
 │   ├── planning/             # task_plan, findings, progress
 │   ├── ux/                   # flows, IA, visual system, reviews
 │   └── briefs/               # Lead task briefs
