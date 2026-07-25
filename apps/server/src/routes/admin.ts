@@ -327,15 +327,16 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const session = await requireAdmin(req, reply);
     if (!session) return;
     const body = (req.body ?? {}) as {
+      current_password?: string;
       old_password?: string;
       new_password?: string;
     };
-    const oldPassword = body.old_password || "";
+    const oldPassword = body.current_password || body.old_password || "";
     const newPassword = body.new_password || "";
     if (!oldPassword || !newPassword) {
       return reply
         .code(400)
-        .send({ code: 400, msg: "old_password and new_password required" });
+        .send({ code: 400, msg: "current_password and new_password required" });
     }
     if (!verifyPassword(oldPassword, session.user.passwordHash)) {
       return reply.code(401).send({ code: 401, msg: "old password incorrect" });
