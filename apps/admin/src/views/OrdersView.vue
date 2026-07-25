@@ -191,6 +191,7 @@ onMounted(load)
           :columns="columns"
           :data="rows"
           :bordered="false"
+          :scroll-x="1100"
           :row-key="(r) => String(r.trade_no ?? r.order_no ?? Math.random())"
           :pagination="{
             page: query.page,

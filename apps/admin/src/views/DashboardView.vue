@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { h, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { NCard, NDataTable, NSpin, useMessage, type DataTableColumns } from 'naive-ui'
+import { NCard, NDataTable, NGrid, NGi, NSpin, useMessage, type DataTableColumns } from 'naive-ui'
 import { fetchOrders } from '../api/admin'
 import { formatTime, money, pickMsg } from '../utils/format'
 import PageHeader from '../components/PageHeader.vue'
@@ -88,14 +88,22 @@ function openOrder(row: Record<string, unknown>) {
   <div>
     <PageHeader title="概览" description="基于订单列表汇总的经营快照；通知失败请到订单详情处理" />
     <NSpin :show="loading">
-      <div class="stats-grid">
-        <KpiCard label="订单数" :value="orderCountVal" hint="列表接口 total / 当前页推断" />
-        <KpiCard label="成功金额" :value="amountSumVal" hint="当前样本中已支付汇总" />
-        <KpiCard label="支付成功" :value="successCountVal" />
-        <KpiCard label="通知失败" :value="failNotifyVal" hint="样本内支付成功且通知异常" />
-      </div>
+      <NGrid cols="1 s:2 m:2 l:4" :x-gap="16" :y-gap="16" responsive="screen" class="kpi-grid">
+        <NGi>
+          <KpiCard label="订单数" :value="orderCountVal" hint="列表接口 total / 当前页推断" />
+        </NGi>
+        <NGi>
+          <KpiCard label="成功金额" :value="amountSumVal" hint="当前样本中已支付汇总" />
+        </NGi>
+        <NGi>
+          <KpiCard label="支付成功" :value="successCountVal" />
+        </NGi>
+        <NGi>
+          <KpiCard label="通知失败" :value="failNotifyVal" hint="样本内支付成功且通知异常" />
+        </NGi>
+      </NGrid>
 
-      <NCard title="最近订单" :bordered="true" class="page-card">
+      <NCard title="最近订单" :bordered="true" class="page-card recent-card">
         <div class="table-scroll">
           <NDataTable
             v-if="recent.length"
@@ -103,6 +111,7 @@ function openOrder(row: Record<string, unknown>) {
             :data="recent"
             :bordered="false"
             size="small"
+            :scroll-x="720"
             :row-props="(row) => ({ style: 'cursor:pointer', onClick: () => openOrder(row) })"
           />
           <EmptyState
@@ -115,3 +124,13 @@ function openOrder(row: Record<string, unknown>) {
     </NSpin>
   </div>
 </template>
+
+<style scoped>
+.kpi-grid {
+  margin-bottom: 20px;
+  width: 100%;
+}
+.recent-card {
+  width: 100%;
+}
+</style>

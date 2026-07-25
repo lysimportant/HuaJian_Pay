@@ -37,8 +37,9 @@
   --hj-space-6: 24px;
   --hj-space-8: 32px;
   --hj-header-h: 56px;
-  --hj-sider-w: 240px;
-  --hj-content-max: 1280px;
+  --hj-sider-w: 232px;
+  /* Content uses full main area; avoid artificial narrow column on wide screens */
+  --hj-content-max: none;
 }
 
 *,
@@ -90,7 +91,8 @@ button,
 
 .page {
   width: 100%;
-  max-width: var(--hj-content-max);
+  max-width: none;
+  min-width: 0;
 }
 
 .page-card {
@@ -119,9 +121,10 @@ button,
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--hj-space-4);
   margin-bottom: var(--hj-space-5);
+  width: 100%;
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 1280px) {
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -137,6 +140,16 @@ button,
     min-width: 100%;
     max-width: none;
   }
+}
+
+/* Ensure Naive layout children can shrink and fill remaining width */
+.n-layout,
+.n-layout-scroll-container {
+  min-width: 0;
+}
+
+.n-data-table {
+  width: 100%;
 }
 
 .table-scroll {
