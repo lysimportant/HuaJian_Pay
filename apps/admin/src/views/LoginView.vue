@@ -20,6 +20,7 @@ async function submit() {
   loading.value = true
   try {
     const res = await login(form.username, form.password)
+    // 业务失败（HTTP 200 + code != 0）：只在这里弹一次
     if (res && typeof res.code === 'number' && res.code !== 0) {
       message.error(res.msg || '登录失败')
       return
@@ -35,7 +36,7 @@ async function submit() {
     message.success('登录成功')
     router.replace('/dashboard')
   } catch (e) {
-    // Single toast with accurate server msg (e.g. 用户名或密码错误)
+    // HTTP 401 等：唯一 toast 来源（拦截器不弹 Message）
     message.error(pickMsg(e, '登录失败'))
   } finally {
     loading.value = false

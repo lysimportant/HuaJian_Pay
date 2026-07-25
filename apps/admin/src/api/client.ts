@@ -20,7 +20,8 @@ api.interceptors.response.use(
   (response) => response.data,
   (error) => {
     if (error.response?.status === 401) {
-      // Login wrong password is 401 — do not clear/redirect on login page or /login API
+      // Login wrong password is 401 — do not clear/redirect on login page or /login API.
+      // Also: interceptors never show Message — LoginView is the single toast source.
       const url = String(error?.config?.url || '')
       const onLogin =
         typeof window !== 'undefined' && window.location.pathname.includes('/login')

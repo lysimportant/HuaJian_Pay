@@ -63,7 +63,7 @@ export function useTheme() {
     mode.value = next
   }
 
-  /** Single-click light <-> dark (from system uses currently resolved appearance). */
+  /** Single-click light ↔ dark (from system uses currently resolved appearance). */
   function toggleLightDark() {
     const currentlyDark = resolveIsDark(mode.value)
     setMode(currentlyDark ? 'light' : 'dark')

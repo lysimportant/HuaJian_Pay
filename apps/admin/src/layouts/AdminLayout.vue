@@ -30,6 +30,7 @@ import {
   MoonOutline,
   DesktopOutline,
   LogOutOutline,
+  ChevronDownOutline,
 } from '@vicons/ionicons5'
 import { fetchMe, roleLabel, type MeUser } from '../api/admin'
 import { clearAuth, getUsername } from '../utils/auth'
@@ -42,7 +43,7 @@ const collapsed = ref(false)
 const mobileOpen = ref(false)
 const isNarrow = ref(false)
 const me = ref<MeUser | null>(null)
-const { mode, isDark, modeLabel, setMode, toggleLightDark } = useTheme()
+const { mode, isDark, setMode, toggleLightDark } = useTheme()
 
 /** viewer 隐藏写通道/商户；账号管理仅在 Profile 内 gate */
 const canWriteConfig = computed(() => me.value?.role !== 'viewer')
@@ -95,9 +96,16 @@ const themeIcon = computed(() => {
   return isDark.value ? MoonOutline : SunnyOutline
 })
 
+const themeToggleLabel = computed(() => {
+  if (mode.value === 'system') {
+    return isDark.value ? '深色（系统）' : '浅色（系统）'
+  }
+  return isDark.value ? '深色' : '浅色'
+})
+
 const themeTip = computed(() => {
-  if (mode.value === 'system') return '跟随系统（点击切换亮/暗）'
-  return isDark.value ? '深色（点击切换浅色）' : '浅色（点击切换深色）'
+  if (mode.value === 'system') return '当前跟随系统；单击切换为亮/暗'
+  return isDark.value ? '单击切换为浅色' : '单击切换为深色'
 })
 
 const accountOptions = computed(() => [
@@ -132,7 +140,7 @@ function onThemeMenuSelect(key: string) {
   if (key === 'light' || key === 'dark' || key === 'system') setMode(key)
 }
 
-/** Primary click: one-shot light/dark — no dual bind with cycleMode */
+/** Primary visible control: one-shot light/dark — no NTooltip wrapper race */
 function onThemeClick() {
   toggleLightDark()
 }
@@ -170,7 +178,7 @@ watch(
   <div class="shell" :class="{ 'shell-narrow': isNarrow }">
     <div v-if="isNarrow && mobileOpen" class="shell-mask" @click="mobileOpen = false" />
 
-    <NLayout has-sider class="shell-layout">
+    <NLayout has-sider position="absolute" class="shell-layout">
       <NLayoutSider
         v-show="!isNarrow || mobileOpen"
         bordered
@@ -202,7 +210,7 @@ watch(
         />
       </NLayoutSider>
 
-      <NLayout>
+      <NLayout class="shell-main">
         <NLayoutHeader bordered class="shell-header">
           <div class="header-left">
             <NButton
@@ -222,27 +230,39 @@ watch(
             </div>
           </div>
           <NSpace align="center" :size="8">
-            <NDropdown
-              trigger="hover"
-              :options="themeMenuOptions"
-              @select="onThemeMenuSelect"
-            >
-              <NTooltip>
-                <template #trigger>
-                  <NButton
-                    quaternary
-                    circle
-                    :aria-label="themeTip"
-                    @click.stop="onThemeClick"
-                  >
-                    <template #icon>
-                      <NIcon :component="themeIcon" />
-                    </template>
-                  </NButton>
+            <!-- 显式可见主题切换：主按钮单击 light↔dark；旁侧次级菜单含 system -->
+            <div class="theme-control" role="group" aria-label="主题切换">
+              <NButton
+                secondary
+                size="small"
+                class="theme-toggle-btn"
+                :aria-label="themeTip"
+                :title="themeTip"
+                @click="onThemeClick"
+              >
+                <template #icon>
+                  <NIcon :component="themeIcon" />
                 </template>
-                {{ themeTip }} · 悬停可选跟随系统
-              </NTooltip>
-            </NDropdown>
+                {{ themeToggleLabel }}
+              </NButton>
+              <NDropdown
+                trigger="click"
+                :options="themeMenuOptions"
+                @select="onThemeMenuSelect"
+              >
+                <NButton
+                  secondary
+                  size="small"
+                  class="theme-menu-btn"
+                  aria-label="更多主题选项"
+                  title="浅色 / 深色 / 跟随系统"
+                >
+                  <template #icon>
+                    <NIcon :component="ChevronDownOutline" />
+                  </template>
+                </NButton>
+              </NDropdown>
+            </div>
 
             <NDropdown
               trigger="click"
@@ -257,7 +277,7 @@ watch(
           </NSpace>
         </NLayoutHeader>
 
-        <NLayoutContent class="shell-content" content-style="padding: 0;">
+        <NLayoutContent class="shell-content" :native-scrollbar="true">
           <div class="page-wrap">
             <router-view v-slot="{ Component }">
               <transition name="page-fade" mode="out-in">
@@ -273,15 +293,24 @@ watch(
 
 <style scoped>
 .shell {
+  position: relative;
+  height: 100dvh;
   min-height: 100vh;
+  overflow: hidden;
   background: var(--hj-bg-app);
 }
 .shell-layout {
-  min-height: 100vh;
+  height: 100%;
   background: transparent;
 }
 .shell-sider {
+  height: 100%;
   background: var(--hj-bg-surface);
+}
+.shell-sider :deep(.n-layout-sider-scroll-container) {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 .shell-sider-drawer {
   position: fixed !important;
@@ -289,6 +318,7 @@ watch(
   top: 0;
   bottom: 0;
   z-index: 40;
+  height: 100dvh !important;
   box-shadow: var(--hj-shadow-elevated);
 }
 .shell-mask {
@@ -303,6 +333,7 @@ watch(
   gap: 12px;
   padding: 18px 16px 12px;
   min-height: 72px;
+  flex-shrink: 0;
 }
 .brand-collapsed {
   justify-content: center;
@@ -332,8 +363,15 @@ watch(
   font-size: 12px;
   color: var(--hj-text-secondary);
 }
+.shell-main {
+  height: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
 .shell-header {
   height: 64px;
+  flex-shrink: 0;
   padding: 0 20px;
   display: flex;
   align-items: center;
@@ -345,10 +383,28 @@ watch(
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 .header-sub {
   display: block;
   font-size: 12px;
+}
+.theme-control {
+  display: inline-flex;
+  align-items: stretch;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.theme-toggle-btn {
+  border-top-right-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+}
+.theme-menu-btn {
+  border-top-left-radius: 0 !important;
+  border-bottom-left-radius: 0 !important;
+  border-left: 0 !important;
+  padding-inline: 6px !important;
+  min-width: 28px;
 }
 .account-trigger {
   display: inline-flex;
@@ -375,14 +431,22 @@ watch(
   .account-name {
     display: none;
   }
+  .theme-toggle-btn :deep(.n-button__content) {
+    /* 极窄屏只显示图标，仍保留显式按钮 */
+  }
 }
 .shell-content {
+  flex: 1;
+  min-height: 0;
   background: transparent;
 }
 .page-wrap {
+  /* 主区全宽：不得 max-width 压窄 */
+  width: 100%;
+  max-width: none;
+  margin: 0;
   padding: 20px;
-  max-width: 1280px;
-  margin: 0 auto;
+  box-sizing: border-box;
 }
 @media (max-width: 767px) {
   .page-wrap {
