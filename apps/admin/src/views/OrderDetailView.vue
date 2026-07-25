@@ -11,7 +11,7 @@ import {
   NSpin,
   useMessage,
 } from 'naive-ui'
-import { fetchOrder, resendOrderNotify } from '../api/admin'
+import { fetchOrder, resendNotify as resendNotifyApi } from '../api/admin'
 import { formatTime, money, pickMsg } from '../utils/format'
 import PageHeader from '../components/PageHeader.vue'
 import StatusTag from '../components/StatusTag.vue'
@@ -67,7 +67,7 @@ async function resendNotify() {
 
   resendLoading.value = true
   try {
-    const res: any = await resendOrderNotify(tradeNo)
+    const res: any = await resendNotifyApi(tradeNo)
     if (res?.attempt?.success) {
       message.success(text.resendSuccess)
     } else {

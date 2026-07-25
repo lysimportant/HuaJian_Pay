@@ -4,6 +4,13 @@ export function money(v: unknown): string {
   return `¥${n.toFixed(2)}`
 }
 
+/** Amount from integer cents */
+export function moneyFromCents(cents: unknown): string {
+  const n = Number(cents || 0)
+  if (!Number.isFinite(n)) return '¥0.00'
+  return money(n / 100)
+}
+
 export function formatTime(v: unknown): string {
   if (v == null || v === '') return '-'
   const n = Number(v)

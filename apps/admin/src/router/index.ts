@@ -50,6 +50,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '商户管理' },
       },
       {
+        path: 'profile',
+        name: 'profile',
+        component: () => import('../views/ProfileView.vue'),
+        meta: { title: '个人信息' },
+      },
+      {
         path: 'settings',
         name: 'settings',
         component: () => import('../views/SettingsView.vue'),

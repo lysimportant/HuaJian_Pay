@@ -13,13 +13,18 @@ import {
   NMenu,
   NSpace,
   NText,
+  NTooltip,
+  useMessage,
   type MenuOption,
 } from 'naive-ui'
 import { clearToken, getUsername } from '../utils/auth'
+import { useTheme } from '../composables/useTheme'
 
 const router = useRouter()
 const route = useRoute()
+const message = useMessage()
 const username = computed(() => getUsername() || 'admin')
+const { mode, modeLabel, cycleMode, isDark } = useTheme()
 
 const MOBILE_BP = 1024
 const SIDER_WIDTH = 232
@@ -52,12 +57,7 @@ function icon(paths: string[]) {
 }
 
 const I = {
-  grid: icon([
-    'M4 4h7v7H4z',
-    'M13 4h7v7h-7z',
-    'M4 13h7v7H4z',
-    'M13 13h7v7h-7z',
-  ]),
+  grid: icon(['M4 4h7v7H4z', 'M13 4h7v7h-7z', 'M4 13h7v7H4z', 'M13 13h7v7h-7z']),
   list: icon(['M8 6h13', 'M8 12h13', 'M8 18h13', 'M3 6h.01', 'M3 12h.01', 'M3 18h.01']),
   wallet: icon(['M3 7h18v12H3z', 'M16 12h5', 'M3 7l2-3h14l2 3']),
   card: icon(['M3 6h18v12H3z', 'M3 10h18']),
@@ -67,12 +67,14 @@ const I = {
     'M22 21v-2a4 4 0 0 0-3-3.87',
     'M16 3.13a4 4 0 0 1 0 7.75',
   ]),
+  person: icon([
+    'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2',
+    'M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
+  ]),
   settings: icon([
     'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
     'M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9c.3.6.9 1 1.6 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
   ]),
-  menu: icon(['M4 6h16', 'M4 12h16', 'M4 18h16']),
-  logout: icon(['M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4', 'M16 17l5-5-5-5', 'M21 12H9']),
 }
 
 const menuOptions: MenuOption[] = [
@@ -81,6 +83,7 @@ const menuOptions: MenuOption[] = [
   { label: '支付宝', key: '/channels/alipay', icon: I.wallet },
   { label: '微信支付', key: '/channels/wxpay', icon: I.card },
   { label: '商户', key: '/merchants', icon: I.users },
+  { label: '个人信息', key: '/profile', icon: I.person },
   { label: '设置', key: '/settings', icon: I.settings },
 ]
 
@@ -89,6 +92,7 @@ const activeKey = computed(() => {
   if (route.path.startsWith('/channels/wxpay')) return '/channels/wxpay'
   if (route.path.startsWith('/channels/alipay')) return '/channels/alipay'
   if (route.path.startsWith('/channels')) return route.path
+  if (route.path.startsWith('/profile')) return '/profile'
   return route.path
 })
 
@@ -104,7 +108,13 @@ function onMenuUpdate(key: string) {
 
 function logout() {
   clearToken()
+  message.success('已退出登录')
   router.replace('/login')
+}
+
+function onThemeClick() {
+  cycleMode()
+  message.success(`主题：${modeLabel.value}`)
 }
 
 function syncViewport() {
@@ -213,8 +223,42 @@ watch(
             <NText depth="3" class="header-hint">运营控制台</NText>
           </div>
         </div>
-        <NSpace align="center" :size="12">
-          <NText depth="3" class="header-user">{{ username }}</NText>
+        <NSpace align="center" :size="8">
+          <NTooltip>
+            <template #trigger>
+              <NButton quaternary circle :aria-label="`主题 ${modeLabel}`" @click="onThemeClick">
+                <template #icon>
+                  <NIcon :size="18">
+                    <svg
+                      v-if="isDark"
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                    >
+                      <path d="M21 14.5A8.5 8.5 0 1 1 9.5 3 7 7 0 0 0 21 14.5z" />
+                    </svg>
+                    <svg
+                      v-else
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                    >
+                      <circle cx="12" cy="12" r="4" />
+                      <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+                    </svg>
+                  </NIcon>
+                </template>
+              </NButton>
+            </template>
+            主题：{{ modeLabel }}（{{ mode }}）
+          </NTooltip>
+          <NButton quaternary @click="router.push('/profile')">
+            <NText depth="3" class="header-user">{{ username }}</NText>
+          </NButton>
           <NButton quaternary type="primary" @click="logout">
             <template #icon>
               <NIcon :size="18">
@@ -246,7 +290,13 @@ watch(
         }"
       >
         <div class="page">
-          <router-view />
+          <router-view v-slot="{ Component, route: r }">
+            <transition name="page-fade" mode="out-in">
+              <div :key="r.fullPath" class="page-view">
+                <component :is="Component" />
+              </div>
+            </transition>
+          </router-view>
         </div>
       </NLayoutContent>
     </NLayout>
@@ -355,6 +405,9 @@ watch(
 
 .header-user {
   font-size: 13px;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .shell-content {
@@ -368,6 +421,39 @@ watch(
   min-width: 0;
 }
 
+.page-view {
+  width: 100%;
+  min-width: 0;
+}
+
+.page-fade-enter-active,
+.page-fade-leave-active {
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+.page-fade-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.page-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-fade-enter-active,
+  .page-fade-leave-active {
+    transition: none;
+  }
+  .page-fade-enter-from,
+  .page-fade-leave-to {
+    transform: none;
+  }
+}
+
 @media (max-width: 1023px) {
   .header-hint {
     display: none;
@@ -376,7 +462,7 @@ watch(
 
 @media (max-width: 480px) {
   .header-user {
-    display: none;
+    max-width: 72px;
   }
 }
 </style>
