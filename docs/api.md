@@ -139,28 +139,37 @@ Public user JSON:
 }
 ```
 
-### 6.2 Multi-admin users (role=`admin` only)
+### 6.2 Roles (RBAC)
+
+| role | 中文 | Capabilities |
+| --- | --- | --- |
+| `super_admin` | 超级管理员 | 账号 CRUD；通道/商户写；订单读；`/me*` |
+| `admin` | 管理员 | 同上（不可创建 `super_admin`；改超级管理员需自身为 super_admin） |
+| `viewer` | 普通用户 | 仅 `/me*` + 订单只读；**禁止** `/admin-users*` 与通道/商户写 |
+
+登录失败等稳定中文：`用户名或密码错误`、`原密码错误`、`权限不足，普通用户无法管理账号` 等。
+
+### 6.3 Multi-admin users (`super_admin` / `admin` only)
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/admin/api/admin-users` | List users (no hashes) |
-| POST | `/admin/api/admin-users` | Create `{ username, password, display_name?, role? }` |
-| PATCH | `/admin/api/admin-users/:id` | Update `display_name` / `role` / `status`; cannot disable or demote **last active admin**; disable bumps `token_version` |
-| POST | `/admin/api/admin-users/:id/reset-password` | Body `{ new_password }`; bumps `token_version`; no password echo |
+| GET | `/admin/api/admin-users` | 列表；query `keyword` / `role` / `status`；不回显 hash |
+| GET | `/admin/api/admin-users/:id` | 单用户详情 |
+| POST | `/admin/api/admin-users` | 创建 `{ username, password, display_name?, role? }`（`admin`\|`viewer`） |
+| PATCH | `/admin/api/admin-users/:id` | 编辑 `username` / `display_name` / `role` / `status`；禁禁用/降级**最后一个有效管理员** |
+| DELETE | `/admin/api/admin-users/:id` | 删除；禁删自己 / 最后有效管理员 |
+| POST | `/admin/api/admin-users/:id/reset-password` | `{ new_password }`；bump `token_version` |
 
-### 6.3 Orders / channels / merchants
+### 6.4 Orders / channels / merchants
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/admin/api/orders` | List/filter orders |
+| GET | `/admin/api/orders` | List/filter orders（登录即可） |
 | GET | `/admin/api/orders/:tradeNo` | Detail + notify logs |
-| GET/PUT | `/admin/api/channels/alipay` | Alipay config (GET never echoes secrets; PUT empty = preserve) |
-| GET/PUT | `/admin/api/channels/wxpay` | WeChat APIv3 config (GET never echoes secrets; PUT empty = preserve) |
-| GET | `/admin/api/merchants` | Merchant list |
-| POST | `/admin/api/merchants` | Create merchant / rotate key |
-
-All admin mutations require auth. `viewer` role can login and use profile/orders/read paths
-as currently gated by `requireAdmin`; user-management routes require `role=admin`.
+| GET/PUT | `/admin/api/channels/alipay` | 写操作需管理员角色；GET 不回显密钥 |
+| GET/PUT | `/admin/api/channels/wxpay` | 同上 |
+| GET | `/admin/api/merchants` | Merchant list（管理员） |
+| POST | `/admin/api/merchants` | Create merchant / rotate key（管理员） |
 
 ---
 
