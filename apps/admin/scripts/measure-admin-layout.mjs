@@ -304,27 +304,35 @@ async function main() {
     await sleep(400)
     const m = await evalExpr(`(() => {
       let siderW = 0;
+      let siderH = 0;
       let siderVisible = false;
       document.querySelectorAll('.n-layout-sider').forEach(el => {
         const r = el.getBoundingClientRect();
         const disp = getComputedStyle(el).display;
         if (r.width > 1 && disp !== 'none') {
           siderW = Math.round(r.width);
+          siderH = Math.round(r.height);
           siderVisible = true;
         }
       });
+      const shellEl = document.querySelector('.shell');
       const mainEl = document.querySelector('.shell-main');
       const page = document.querySelector('.page');
       const content = document.querySelector('.n-layout-content, .shell-content');
+      const shellH = shellEl ? Math.round(shellEl.getBoundingClientRect().height) : 0;
       const mainW = mainEl ? Math.round(mainEl.getBoundingClientRect().width) : 0;
       const pageW = page ? Math.round(page.getBoundingClientRect().width) : 0;
       const contentW = content ? Math.round(content.getBoundingClientRect().width) : 0;
       const vw = window.innerWidth;
+      const vh = window.innerHeight;
       const hamburger = !!document.querySelector('.shell-header button[aria-label="打开导航"]');
       const drawer = document.querySelector('.n-drawer');
       return {
         vw,
+        vh,
+        shellH,
         siderW,
+        siderH,
         siderVisible,
         mainW,
         contentW,
@@ -341,7 +349,31 @@ async function main() {
     results.push({ width: w, ...m })
   }
 
-  console.log(JSON.stringify({ ok: true, base: BASE, results }, null, 2))
+  const pageResults = []
+  await setViewport(1440, 900)
+  for (const path of ['/dashboard', '/orders', '/merchants', '/settings']) {
+    await ws.call('Page.navigate', { url: `${BASE}${path}` })
+    await sleep(800)
+    pageResults.push(await evalExpr(`(() => {
+      const sider = [...document.querySelectorAll('.n-layout-sider')].find((el) => {
+        const r = el.getBoundingClientRect();
+        return r.width > 1 && getComputedStyle(el).display !== 'none';
+      });
+      const main = document.querySelector('.shell-main');
+      const sr = sider?.getBoundingClientRect();
+      const mr = main?.getBoundingClientRect();
+      return {
+        path: location.pathname,
+        viewportH: innerHeight,
+        siderH: sr ? Math.round(sr.height) : 0,
+        siderBottom: sr ? Math.round(sr.bottom) : 0,
+        mainW: mr ? Math.round(mr.width) : 0,
+        themeToggleVisible: !!document.querySelector('.theme-toggle-btn'),
+      };
+    })()`))
+  }
+
+  console.log(JSON.stringify({ ok: true, base: BASE, results, pageResults }, null, 2))
   ws.close()
   child.kill()
   try {

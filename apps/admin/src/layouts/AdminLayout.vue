@@ -146,7 +146,7 @@ function onThemeClick() {
 }
 
 function updateNarrow() {
-  isNarrow.value = window.innerWidth < 768
+  isNarrow.value = window.innerWidth <= 768
   if (!isNarrow.value) mobileOpen.value = false
 }
 
