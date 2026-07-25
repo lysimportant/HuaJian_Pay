@@ -1,280 +1,175 @@
 # HuaJian_Pay — Agents Guide
 
-**Platform:** HuaJian_Pay  
-**Repo:** https://github.com/lysimportant/HuaJian_Pay.git  
+**Repository:** https://github.com/lysimportant/HuaJian_Pay.git
 **Workspace:** `D:\pay\HuaJian_Pay`  
 **Encoding:** UTF-8  
-**Language:** English for code identifiers, APIs, paths, tags, and branch names; use Chinese for Git commit/push summaries, product copy, and user docs.
+**Language:** English for code identifiers, APIs, paths, branch names and tags; Chinese for product copy, documentation and Git commit summaries.
 
 ---
 
-## 1. Product Goal
+## 1. Current Project Baseline
 
-Build a lightweight **YiPay-compatible payment collection platform** for **newapi** billing.
+HuaJian_Pay is a Node.js/TypeScript payment gateway for newapi, compatible with common YiPay-style merchant requests.
 
-### Must-have (MVP)
-- Merchant fills **Alipay account** and can receive payments to that account.
-- Create order → pay page / QR → async notify → order success.
-- Admin/merchant console: channel config, orders, notify logs, API keys.
-- Compatible with common **YiPay (易支付)** style merchant API where practical (`pid`, `key`, `notify_url`, `return_url`, sign rules).
-- Integrate cleanly with **newapi** as the business upstream caller.
+Implemented baseline:
 
-### Should-have (same MVP if feasible)
-- **WeChat Pay** channel with the same “receive to configured account/app” effect when credentials allow.
+- Fastify + Drizzle ORM + SQLite backend.
+- Vue 3 + Vite + Naive UI Admin console.
+- YiPay-style submit/query/sign/notify flow.
+- Official Alipay RSA2 pre-create and notify verification.
+- WeChat Pay APIv3 Native and notify verification/decryption.
+- Mock channel, deterministic E2E, Docker/deployment skeleton.
+- Multi-user Admin RBAC, personal profile/password update, account CRUD.
+- Light/dark/system themes, full-height responsive sidebar, route transitions, Message feedback and KPI count-up animation.
 
-### Non-goals (v1)
-- Multi-currency / crypto.
-- Full bank settlement network.
-- Heavy multi-tenant SaaS billing beyond single-operator + merchants.
+Production truth:
 
----
-
-## 2. Team Roster & Responsibilities
-
-| Name | Role | Owns | Does NOT own |
-| --- | --- | --- | --- |
-| **Aion CLI** | Lead | Task board, sequencing, review, Git release policy, synthesis to user | Day-to-day feature coding |
-| **Planner** | Architecture & planning | `docs/planning/*` plan files, module split, data model, API sketch, security baseline | Large code dumps |
-| **Coder** | Feature / payment coding | Backend+frontend feature implementation, bugfix, tests, adapters | Pure visual design tokens only |
-| **PayCore / E2EFixer** | Payment backend / verification | Server, DB, Alipay/WeChat, sign/notify, mock E2E | Pixel-perfect UI polish |
-| **AdminUI** | Admin / merchant frontend wiring | Console pages, forms, API wiring | Payment crypto internals |
-| **UIPolish** | Visual UI beauty | Visual polish, theme, spacing, hierarchy, component styling to look premium | Backend protocol / DB schema |
-| **FileManager** | Repository file hygiene | Directory structure, moves, `.gitignore`, prevent root clutter, classify files by type | Business feature logic |
-| **Designer** | UX / UI system | Information architecture, flows, visual tokens, component guidance | Production backend logic |
-
-### Responsibility detail
-
-#### Planner
-- Survey YiPay open protocols and realistic Alipay/WeChat personal/merchant receive options.
-- Decide stack (recommend Node/Go/PHP only after findings; prefer maintainable modern stack).
-- Produce architecture, ER diagram notes, env vars, deploy notes under `docs/`.
-- Keep plan files under `docs/planning/` updated as truth for teammates.
-
-#### Coder
-- Dedicated implementation role for production code (server, admin, shared packages, tests).
-- Prefer small reviewable commits; push each completed slice.
-- Follow directory layout and do not dump new files into repo root.
-
-#### PayCore / E2EFixer
-- Implement payment core: orders, channels, callbacks, idempotency, signature verify, retry notify.
-- Alipay path first; WeChat second if credentials model is clear.
-- Keep mock E2E single-command and deterministic.
-- Every completed step: commit + push (see Git rules).
-
-#### AdminUI
-- Build admin + merchant UI against backend APIs.
-- Screens: login, dashboard, channels (Alipay/WeChat), orders, notify logs, system settings, API credentials.
-- English code; Chinese UI labels OK.
-
-#### UIPolish
-- Make the admin/pay UI **look good**: visual hierarchy, color system, cards, tables, empty/error states, mobile density.
-- Implement visual tokens from Designer; prefer CSS/theme files under `apps/admin/src/styles/` and shared components under `apps/admin/src/components/`.
-- Do not invent new API contracts.
-
-#### FileManager
-- Enforce classified directories; move misplaced files; keep root minimal.
-- Own `.gitignore` hygiene and temp isolation under `.tmp/<task-id>/`.
-- Never delete user/business content without Lead authorization; prefer `git mv` preserving history.
-
-#### Designer
-- Define IA and critical flows: “fill Alipay account → receive money”, order lookup, notify failure handling.
-- Provide layout/visual guidance AdminUI/UIPolish can implement without redesign thrash.
+- SQLite is implemented; MySQL is not implemented.
+- Official Alipay/WeChat credentials are required for stable production callbacks. A personal collection code is not an official callback channel.
+- Fresh-seed demo account is `admin / 12345678`; production deployment must replace it with a strong unique password and rotate `APP_SECRET`/`PLATFORM_KEY`.
 
 ---
 
-## 3. Git Rules (mandatory)
+## 2. Current Team State
 
-Repo: `https://github.com/lysimportant/HuaJian_Pay.git`  
-Default branch: `main`
+- **Lead (Aion CLI) is the only current team member.**
+- Former BackendReviewer-Grok, PayPageUI, FileManager, E2EFixer, Coder, Planner, Backend, UI and Integrator slots have been removed. Never assume an old slot is online and never send work to a retired slot.
+- Historical task ownership is audit history only; it does not represent current availability.
+- If new helpers are needed, Lead must first read the live assistant catalog, propose the helper name/responsibility/assistant choice to the user, and wait for explicit approval, unless the user explicitly requests immediate creation.
+- After a lineup is approved, Lead may assign, retry, pause, resume, or replace those helpers without asking for approval for every routine action.
 
-1. **Push after every completed step**  
-   - Finish a meaningful unit of work → `git add` → commit → `git push origin <branch>`.  
-   - Do not batch many unrelated steps without intermediate pushes if the step is already reviewable.
+Suggested temporary scopes when approved:
 
-2. **Commit message style**  
-   - 使用中文摘要，保留英文 Conventional Commit 类型与可选 scope：
-     - `feat(pay): 增加支付宝回调验签`
-     - `docs(agents): 明确团队职责`
-     - `chore(git): 完善忽略规则和项目说明`
-
-3. **Tags for major versions / large milestones**  
-   - Tag format: `vMAJOR.MINOR.PATCH` (semver).  
-   - Examples: `v0.1.0` scaffold, `v0.2.0` alipay MVP, `v1.0.0` production-ready.  
-   - Create annotated tags: `git tag -a v0.1.0 -m "scaffold: project skeleton"` then `git push origin v0.1.0`.
-
-4. **Branching (lightweight)**  
-   - Small team may work on `main` for early scaffold if conflicts are low.  
-   - Prefer feature branches when parallel: `feat/alipay-core`, `feat/admin-ui`.  
-   - Merge via PR when possible; direct push to `main` OK for early empty-repo bootstrap by Lead.
-
-5. **Never force-push `main`** unless user explicitly orders it.  
-6. **Never commit secrets** (`.env`, private keys, certs). Use `.env.example` only.
+- **Backend:** `apps/server/`, schema/migrations, protocol and security tests.
+- **Admin UI:** `apps/admin/`, responsive/visual/interaction QA.
+- **Integrator:** root tooling, CI/Docker, E2E, documentation and repository hygiene.
+- **Reviewer:** read-only-first RBAC, payment-security and UI regression review.
 
 ---
 
-## 4. Cross-Team Execution Rules (v1.1)
+## 3. Product and Security Invariants
 
-**Full text is binding for every current and future teammate.**
+### 3.1 Payments
 
-### 4.1 Principles
-- Keep tasks moving until done, clearly blocked, or paused by user.
-- On recoverable errors: keep files/logs/state; resume from last success; never wipe and restart.
-- Recovery order: inventory → last success node → log error → bounded backoff → retry unfinished → verify → continue.
-- Do not start unbounded retry storms across members.
-- Token/API cost does not justify weak recovery (subject to DR-10M).
+- Store money as integer cents (`amount_cents`).
+- Verify signature, merchant/app identity, order number, amount, currency and payment status before marking paid.
+- Order state only moves forward; callbacks and merchant notifications must be idempotent.
+- Merchant async notify success is the exact plain text required by the protocol.
+- Never log or return private keys, APIv3 keys, hashes, full secrets or raw sensitive credentials.
 
-### 4.2 Recoverable faults
-Treat as recoverable: provider rate limits (429), gateway/network/DNS failures, 5xx, timeouts, truncated/decode errors, temporary auth/route issues, and other transient provider errors.
+### 3.2 Admin RBAC — fail closed
 
-### 4.3 90s no-content strategy
-- If no valid response content within 90s after request start → cancel/discard and resume unfinished part from last good breakpoint.
-- If any valid content arrives within 90s, do not cancel solely because total duration exceeds 90s **unless HTR-90 is also active (see below)**.
-- Retries must reuse verified artifacts.
+Roles:
 
-### 4.4 Breakpoint resume
-- Before retry: inventory task status, files, git status/diff, last verified node.
-- Do not re-run verified steps unless invalidated.
-- Incremental edits only after reading current files.
-- Report which breakpoint you resumed from.
+- `super_admin`: full account and system administration.
+- `admin`: account management and write operations allowed by the backend permission matrix.
+- `viewer`: personal profile/password and explicitly allowed read-only functions only.
 
-### 4.5 Temp files
-- Temp/diagnostics only under task-specific subdirs (e.g. `.tmp/`, `tmp/task-id/`).
-- Do not pollute repo root or ship logs into delivery dirs unless required.
+Mandatory rules:
 
-### 4.6 DR-10M (Ten-call gate)
-- Shared rolling **60s window**, max **10 successful** model/provider calls for the **whole team**.
-- Failures/timeouts/cancels do not count as successes, but still avoid storms.
-- Lead coordinates budget; members must not spawn new agents to bypass.
-- User phrases to pause/resume:  
-  - Pause: `取消 DR-10M 规则` / `停用十次闸门`  
-  - Resume: `启用 DR-10M 规则` / `启用十次闸门`  
-- **Default: ENABLED** unless user paused.
+- Unknown, missing, stale or failed-to-load roles are treated as `viewer`, never as an administrator.
+- Account management UI renders only after `/admin/api/me` succeeds and the returned role is exactly `admin` or `super_admin`.
+- A viewer must never see account list/create/edit/delete controls.
+- Frontend hiding is not authorization. Account APIs must independently return `403` for viewers.
+- `/admin/api/me` and other identity-sensitive Admin responses must be non-cacheable and vary by authorization so switching accounts cannot reuse the previous administrator profile.
+- Prevent deleting/disabling the current account and the final enabled administrator.
+- Username, role, status and password changes must invalidate prior tokens when required.
 
-### 4.7 HTR-90 (Hard 90s gate) — ENABLED
-- Each model/provider/gateway request hard-capped at **90s total**. Cancel at 90s even if partial content arrived.
-- If first valid content not seen by **30s**, cancel early.
-- If runtime cannot cancel, discard late results after regain control; resume from last success.
-- Log: member, task id, total time, TTFB, breakpoint, cancel method, retry result.
-- HTR-90 does not override DR-10M.
+### 3.3 Admin UI regression gates
 
-### 4.8 Roles under these rules
-- Lead: budget, priority, cross-member recovery.
-- Members: report call need, errors, success count, breakpoints; no concurrent retries near DR-10M limit.
-- New members must read this file before work.
-- Handoffs must include artifacts, progress, errors, last success, unfinished steps, budget state.
-
-### 4.8.1 Autonomous task dispatch and reporting (mandatory)
-- **Do not ask the user to confirm individual teammate tasks, assignments, wake-ups, replacements, or routine recovery actions.** The user has granted the Lead standing authority to dispatch and adjust work directly.
-- The Lead creates, assigns, sequences, pauses, resumes, reassigns, or replaces teammates as required by the task and these rules, without a separate user approval turn.
-- A member receiving a task must start execution immediately. Do not ask the user for confirmation and do not remain idle while an assigned, unblocked task is incomplete.
-- Members report through `team_send_message` to the **Lead**, not directly to the user.
-- A member must report to the Lead when:
-  1. a meaningful step or the whole task is complete (include files, commit/push hash, tests, residual risks, next breakpoint);
-  2. an error, timeout, network/provider failure, validation failure, merge conflict, or other blocker occurs (include evidence, existing artifacts, last success, retry count, and proposed recovery entry);
-  3. requirements conflict or a decision is needed that cannot be resolved from repository docs or current task context.
-- The Lead reviews each report and decides whether to accept, request fixes, retry from a breakpoint, reassign, sequence dependent work, or escalate a genuine product decision to the user.
-- Routine ACK/status spam is prohibited. Report only completion, concrete progress checkpoints requested by Lead, actionable errors, or clear blockers.
-- Idle notifications are signals for Lead monitoring, not completion. If an unblocked task remains incomplete, the Lead must wake/reassign the member based on actual files, Git state, and test evidence.
-
-### 4.9 Checklist (every recovery)
-- [ ] Error type recorded?
-- [ ] Treated as recoverable?
-- [ ] Artifacts preserved?
-- [ ] Resume from last success (not full redo)?
-- [ ] HTR-90 first-byte 30s / total 90s enforced?
-- [ ] Late results discarded if uncancellable?
-- [ ] git status/diff checked when in git workspace?
-- [ ] Timeout metadata logged?
-- [ ] Bounded backoff, no storm?
-- [ ] Temp files isolated?
-- [ ] DR-10M enabled? under 10 successes / 60s?
-- [ ] Lead coordinated budget?
-- [ ] No bypass via team/provider/account switch?
-- [ ] Verified output + residual risks + next resume point reported?
+- Desktop sidebar: fixed `232px`, full viewport height on Dashboard, Orders, Merchants and Settings; main uses all remaining width with `min-width: 0` and no accidental content max-width.
+- Mobile: sidebar hidden at the agreed breakpoint; drawer/hamburger available.
+- Theme control remains visible; light↔dark changes on one click; system mode remains available.
+- A failed login produces one Message only.
+- Button operations provide success/error Message feedback.
+- KPI count-up and page transitions respect `prefers-reduced-motion`.
 
 ---
 
-## 5. Working Agreements
+## 4. Git Rules
 
-1. Read this `AGENTS.md` before coding.
-2. Prefer plan files from Planner over tribal memory.
-3. Bug fix order: **locate → fix behavior → types/style last**.
-4. Security first for payment: verify sign, idempotent notify, amount/order match, no secret leakage.
-5. Chinese product UX and Git commit/push summaries are required; **code identifiers, APIs, paths, tags, and branch names remain in English**.
-6. After each assigned task slice: update progress notes + commit + push.
-7. Dependent work is sequential: do not park a teammate on “wait until X finishes” (timeout risk). Lead dispatches B only after A reports done.
+Default branch: `main`.
+
+1. Complete one reviewable step → test → commit → push.
+2. Use Conventional Commit type/scope with a Chinese summary, for example:
+   - `fix(admin): 修复普通用户账号管理越权显示`
+   - `docs(agents): 更新当前团队与权限规则`
+   - `chore(repo): 清理临时文件`
+3. Use annotated SemVer tags for major milestones and push the tag.
+4. Never force-push `main`, amend published commits, or use `--no-verify` unless the user explicitly requires it.
+5. Never commit `.env`, databases, private keys, certificates, API keys, passwords or hashes.
+6. Check `git status`, `git diff` and tests before every commit; verify `HEAD == origin/main` after push.
 
 ---
 
-## 6. Directory Layout
+## 5. Execution and Recovery Rules
 
-Canonical tree map: `docs/structure.md` (maintained by FileManager). & File Classification (mandatory)
+- Read this file and the relevant current source before editing.
+- Use incremental edits; do not overwrite another active writer.
+- Preserve working artifacts on recoverable failures; resume from the last verified checkpoint.
+- Network/429/5xx/timeout/provider errors use bounded retries; no retry storms.
+- Keep temp files under `.tmp/<task-id>/`; never create patch scripts or message dumps in repository root.
+- Stop or reassign helpers that exceed the agreed timeout or repeatedly overwrite shared files.
+- Helpers report only concrete checkpoints, blockers, errors or completion; repeated ACK/idle spam is prohibited.
+- Lead validates actual files, Git state and executable tests; an idle notification is not completion evidence.
 
-**Do not dump everything into the repo root.** Same category → same folder. English path names only.
+### DR-10M
 
-```text
-HuaJian_Pay/
-  AGENTS.md                 # team rules only (root OK)
-  README.md                 # product entry only (root OK)
-  package.json              # monorepo root
-  pnpm-workspace.yaml
-  .env.example
-  .gitignore
-  apps/
-    server/                 # payment backend
-    admin/                  # Vue admin console
-  packages/                 # shared libs (optional)
-  docs/
-    architecture.md
-    api.md
-    deployment.md
-    newapi-integration.md
-    security-checklist.md
-    planning/               # task_plan, findings, progress
-    ux/                     # flows, IA, visual system, reviews
-    briefs/                 # Lead task briefs
-  scripts/                  # e2e / ops scripts
-  data/                     # local sqlite (gitignored content)
-  .tmp/<task-id>/           # temp only; never ship as product
+- Enabled by default: at most 10 successful model/provider calls in a rolling 60-second window for the whole team.
+- Do not bypass the limit by spawning helpers or switching providers/accounts.
+
+### HTR-90
+
+- Enabled by default for model/provider/gateway requests.
+- Cancel if no valid first content by 30 seconds or total duration reaches 90 seconds; preserve partial verified results and resume.
+
+---
+
+## 6. Repository and Root Hygiene
+
+`D:\pay` may contain only:
+
+- `HuaJian_Pay\` — this repository.
+- `.aionrs\` — Aion runtime/skill configuration currently used by the assistant; it is not project code but must not be deleted while the Aion environment depends on it.
+
+Repository root may contain only project/tooling entry files such as:
+
+- `AGENTS.md`, `README.md`, `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`.
+- `.env.example`, `.gitignore`, Docker/Compose configuration and required root TypeScript/tool configs.
+
+Classification:
+
+- Runtime code → `apps/*` or `packages/*`.
+- Product/API/deployment/security docs → `docs/`.
+- Planning → `docs/planning/`; UX → `docs/ux/`; task briefs → `docs/briefs/`.
+- Scripts/tests → `scripts/` or the owning app's `scripts/` directory.
+- Local DB → `data/` (ignored).
+- Logs/screenshots/patches/temp DB/build diagnostics → `.tmp/<task-id>/` (ignored and removable when no process uses them).
+- Generated `dist/`, coverage and caches are not source and must stay ignored.
+- Do not delete `.env`, active database data, valid fixtures, dependencies required for running, or Aion runtime files merely because they are untracked/ignored.
+
+When moving or deleting tracked files, update imports, scripts and documentation links in the same commit.
+
+---
+
+## 7. Required Verification
+
+Use the smallest relevant set, then the full regression gate before release:
+
+```powershell
+pnpm typecheck
+pnpm build
+pnpm --filter @huajian/admin typecheck
+pnpm --filter @huajian/admin build
+pnpm test:admin-users
+pnpm test:admin-ui-static
+pnpm test:theme-toggle
+pnpm test:mock-e2e
+pnpm test:wechat-apiv3
 ```
 
-### Classification rules
-1. Root may only hold monorepo/tooling entry files + `AGENTS.md` + `README.md`.
-2. Planning notes → `docs/planning/` (not root).
-3. Product/API/ops docs → `docs/`.
-4. UX docs → `docs/ux/`.
-5. Lead briefs → `docs/briefs/`.
-6. Runtime code → `apps/*` or `packages/*`.
-7. Scripts → `scripts/`.
-8. Temporary diagnostics → `.tmp/<task-id>/` only.
-9. **FileManager** owns reorganizations; others create files in the correct folder from the start.
-10. When moving files, update imports/README links in the same commit.
+For UI layout complaints, Lead must inspect the running UI at multiple widths and relevant routes; typecheck/build alone is not visual QA.
 
 ---
 
-## 7. Milestone Tags (initial plan)
-
-| Tag | Meaning |
-| --- | --- |
-| `v0.1.0` | Scaffold + AGENTS + README + Git rules |
-| `v0.2.0` | Architecture plan approved / locked |
-| `v0.3.0` | Order + Alipay receive MVP |
-| `v0.4.0` | Admin console MVP |
-| `v0.5.0` | WeChat channel (if feasible) |
-| `v1.0.0` | newapi-ready production baseline |
-
-Lead may adjust tags when scope changes.
-
----
-
-## 8. Immediate Priority Order
-
-1. Keep mock E2E single-command green (`pnpm test:mock-e2e`)
-2. FileManager: classify root planning files into `docs/planning/`
-3. Coder: backend/frontend feature work as assigned
-4. UIPolish: premium visual polish for admin console
-5. Deployment/security docs accuracy + newapi-ready baseline
-
----
-
-*Last updated by Lead (Aion CLI). All teammates must follow this document.*
+*Last updated by Lead (Aion CLI). This file is the current operating source of truth for all future helpers.*
