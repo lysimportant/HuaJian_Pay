@@ -396,6 +396,9 @@ location / {
 | `docs/security-checklist.md` | 威胁模型与上线清单 |
 | `docs/ux/` | 流程、信息架构、视觉与支付页说明 |
 | `docs/planning/` | 任务/结论/进度（过程文档） |
+| docs/guides/alipay-channel-setup.md | 支付宝通道图文配置教程（MD） |
+| docs/guides/HuaJian_Pay-支付宝通道配置教程.docx | 同上 Word 版（含嵌入图） |
+| docs/assets/alipay-channel/ | 支付宝教程统一图片目录 |
 
 ---
 
