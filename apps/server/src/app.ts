@@ -6,6 +6,7 @@ import { wechatChannelRoutes } from "./routes/wechat-channel.js";
 import { healthRoutes } from "./routes/health.js";
 import { payRoutes } from "./routes/pay.js";
 import { publicOrderRoutes } from "./routes/public-order.js";
+import { seoRoutes } from "./routes/seo.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -62,15 +63,20 @@ export async function buildApp() {
     },
   );
 
-  app.get("/", async () => ({
-    name: env.appName,
-    health: "/health",
-    classic: ["/submit.php", "/mapi.php", "/api.php"],
-    public: ["/api/v1/public/orders/:tradeNo/status"],
-    channels: ["/channels/alipay/notify", "/channels/wxpay/notify"],
-    admin: "/admin/api/*",
-  }));
+  app.get("/", async (_req, reply) => {
+    reply.header("X-Robots-Tag", "noindex, nofollow");
+    return {
+      name: env.appName,
+      health: "/health",
+      robots: "/robots.txt",
+      classic: ["/submit.php", "/mapi.php", "/api.php"],
+      public: ["/api/v1/public/orders/:tradeNo/status"],
+      channels: ["/channels/alipay/notify", "/channels/wxpay/notify"],
+      admin: "/admin/api/*",
+    };
+  });
 
+  await app.register(seoRoutes);
   await app.register(healthRoutes);
   await app.register(payRoutes);
   await app.register(publicOrderRoutes);

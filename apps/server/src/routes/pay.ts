@@ -208,6 +208,7 @@ export async function payRoutes(app: FastifyInstance): Promise<void> {
       return reply
         .type("text/html; charset=utf-8")
         .header("Cache-Control", "no-store")
+        .header("X-Robots-Tag", "noindex, nofollow, noarchive")
         .send((result as { __html: string }).__html);
     }
     return reply.send(result);
@@ -224,6 +225,7 @@ export async function payRoutes(app: FastifyInstance): Promise<void> {
       return reply
         .type("text/html; charset=utf-8")
         .header("Cache-Control", "no-store")
+        .header("X-Robots-Tag", "noindex, nofollow, noarchive")
         .send((result as { __html: string }).__html);
     }
     return reply.send(result);
@@ -241,6 +243,7 @@ export async function payRoutes(app: FastifyInstance): Promise<void> {
       return reply
         .type("text/html; charset=utf-8")
         .header("Cache-Control", "no-store")
+        .header("X-Robots-Tag", "noindex, nofollow, noarchive")
         .send(result.__html);
     },
   );
@@ -252,6 +255,7 @@ export async function payRoutes(app: FastifyInstance): Promise<void> {
       return reply
         .type("text/html; charset=utf-8")
         .header("Cache-Control", "no-store")
+        .header("X-Robots-Tag", "noindex, nofollow, noarchive")
         .send(result.__html);
     },
   );

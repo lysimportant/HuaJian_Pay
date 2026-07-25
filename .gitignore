@@ -53,3 +53,11 @@ apps/admin/src/**/*.js.map
 apps/*/dist/
 packages/*/dist/
 .vite/
+
+# Nested npm lockfiles (repo uses root pnpm-lock.yaml)
+package-lock.json
+apps/**/package-lock.json
+
+# Local one-off admin measure scripts
+measure-*.mjs
+apps/admin/scripts/measure-*.mjs

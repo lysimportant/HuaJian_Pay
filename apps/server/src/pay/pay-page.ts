@@ -99,7 +99,12 @@ export function renderPayPage(data: PayPageBootstrap): string {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="color-scheme" content="light" />
-  <meta name="robots" content="noindex,nofollow" />
+  <meta name="theme-color" content="#F4F6F9" />
+  <!-- Transaction pages must not be indexed or archived (trade_no / amount / QR). -->
+  <meta name="robots" content="noindex, nofollow, noarchive, nosnippet" />
+  <meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="description" content="安全收银台。本页含订单支付信息，不对搜索引擎开放。" />
   <title>订单支付 · 花间支付</title>
   <style>
     :root {

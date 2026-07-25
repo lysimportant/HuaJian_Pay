@@ -12,6 +12,8 @@ function setNoStore(reply: FastifyReply): void {
   reply.header("Cache-Control", "no-store, max-age=0");
   reply.header("Pragma", "no-cache");
   reply.header("Expires", "0");
+  // Order status JSON must not be treated as public content for crawlers.
+  reply.header("X-Robots-Tag", "noindex, nofollow, noarchive");
 }
 
 function safeReturnUrl(raw: string): string {
