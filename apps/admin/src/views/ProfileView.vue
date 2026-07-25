@@ -50,7 +50,7 @@ const pwdRules: FormRules = {
   current_password: [{ required: true, message: '请输入当前密码', trigger: 'blur' }],
   new_password: [
     { required: true, message: '请输入新密码', trigger: 'blur' },
-    { min: 6, message: '至少 6 位', trigger: 'blur' },
+    { min: 10, message: '至少 10 位', trigger: 'blur' },
   ],
   confirm_password: [
     {
