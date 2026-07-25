@@ -168,19 +168,39 @@ chmod 600 .env
 
 ---
 
-## 6. 启动后端 API（Docker Compose）
+## 6. 一键启动 Docker Compose（推荐）
 
-### 6.1 构建并启动
+### 6.1 写环境变量
 
 ```bash
 cd /opt/HuaJian_Pay
-docker compose up -d --build
+cp .env.production.example .env   # 生产推荐模板（含端口绑定变量）
+# 也可：cp .env.example .env
+nano .env
+chmod 600 .env
 ```
 
-### 6.2 健康检查
+必改项：`APP_URL`（`https://你的域名`）、`APP_SECRET`、`ADMIN_PASSWORD`、`PLATFORM_KEY`，以及支付宝/微信密钥。生产请将 `CHANNEL_MODE` 设为 `alipay` 或 `wxpay`，不要长期使用 `mock`。
+
+### 6.2 启动 API + Admin Web
+
+```bash
+docker compose --profile web up -d --build
+```
+
+这会启动：
+
+| 容器 | 端口 | 作用 |
+| --- | --- | --- |
+| `huajian-pay-api` | `127.0.0.1:8080` | 支付后端（仅本机） |
+| `huajian-pay-admin` | `0.0.0.0:8088` | Admin + 反代支付/回调 |
+| `huajian-pay-admin-dist-init` | — | 同步 Admin 静态资源（一次性） |
+
+### 6.3 健康检查
 
 ```bash
 curl -sS http://127.0.0.1:8080/health
+curl -sS http://127.0.0.1:8088/health
 ```
 
 期望：
@@ -189,150 +209,82 @@ curl -sS http://127.0.0.1:8080/health
 {"ok":true}
 ```
 
-### 6.3 常用运维
+浏览器先访问：
+
+```text
+http://服务器IP:8088/
+```
+
+### 6.4 常用运维
 
 ```bash
-docker compose ps
+docker compose --profile web ps
 docker compose logs -f api
-docker compose restart api
-docker compose down
+docker compose logs -f admin-static
+docker compose --profile web restart
+docker compose --profile web down
 ```
 
-数据卷默认：
+数据卷：
 
 ```text
-huajian_pay_data → 容器 /data
-DB_DSN=/data/huajian_pay.db
+huajian_pay_data  → /data/huajian_pay.db
+huajian_pay_admin_dist → Admin 静态文件
+```
+
+### 6.5 仅启动 API（不要 Admin 容器）
+
+```bash
+docker compose up -d --build
 ```
 
 ---
 
-## 7. 构建 Admin 前端
+## 7. 域名 HTTPS（生产必须）
 
-API **不会**自动托管 Admin 页面，需要单独构建静态资源：
+Compose 的 `8088` 是 HTTP 入口。生产请用宿主机 Nginx/宝塔把域名 443 反代到 `127.0.0.1:8088`。
 
-```bash
-# 服务器需 Node.js 20+ 与 pnpm
-# 若没有 pnpm：
-# npm i -g pnpm
-
-cd /opt/HuaJian_Pay
-pnpm install
-pnpm --filter @huajian/admin build
-```
-
-产物目录：
+参考文件：
 
 ```text
-/opt/HuaJian_Pay/apps/admin/dist
+deploy/nginx-host.conf
+deploy/nginx-compose.conf
 ```
 
-可选 Compose 侧车（本机 8081 预览）：
-
-```bash
-docker compose --profile admin-ui up -d
-# http://服务器IP:8081
-```
-
-生产仍建议用 **Nginx + 域名 HTTPS**，不要长期用 IP:8081。
-
----
-
-## 8. Nginx + HTTPS（核心）
-
-### 8.1 站点配置示例
-
-新建：
-
-```bash
-sudo nano /etc/nginx/sites-available/huajian-pay.conf
-```
-
-内容（把域名和路径换成你的）：
+### 7.1 宿主机反代示例
 
 ```nginx
 server {
   listen 80;
   server_name pay.example.com;
-
-  # 先用于申请证书；证书申请后可由 certbot 自动改写为 443
-  location / {
-    return 301 https://$host$request_uri;
-  }
+  return 301 https://$host$request_uri;
 }
 
 server {
   listen 443 ssl http2;
   server_name pay.example.com;
 
-  # certbot 会写入证书路径；也可手写
   # ssl_certificate     /etc/letsencrypt/live/pay.example.com/fullchain.pem;
   # ssl_certificate_key /etc/letsencrypt/live/pay.example.com/privkey.pem;
 
-  root /opt/HuaJian_Pay/apps/admin/dist;
-  index index.html;
-
-  client_max_body_size 10m;
-
-  # Admin API
-  location /admin/api/ {
-    proxy_pass http://127.0.0.1:8080/admin/api/;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-  }
-
-  # 易支付兼容入口
-  location ~ ^/(submit\.php|mapi\.php|api\.php)$ {
-    proxy_pass http://127.0.0.1:8080;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-  }
-
-  # 支付页 / 通道回调 / 健康检查
-  location ~ ^/(channels|pay|health)(/|$) {
-    proxy_pass http://127.0.0.1:8080;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-
-    # 微信回调需要原始 body；不要做会改写 body 的缓冲插件
-    proxy_request_buffering on;
-  }
-
-  # Admin SPA
   location / {
-    try_files $uri $uri/ /index.html;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_pass http://127.0.0.1:8088;
   }
 }
 ```
 
-启用：
-
-```bash
-sudo ln -sf /etc/nginx/sites-available/huajian-pay.conf /etc/nginx/sites-enabled/huajian-pay.conf
-sudo nginx -t
-sudo systemctl reload nginx
-```
-
-### 8.2 申请 HTTPS 证书
+### 7.2 申请证书
 
 ```bash
 sudo certbot --nginx -d pay.example.com
-```
-
-成功后访问：
-
-```bash
 curl -sS https://pay.example.com/health
 ```
+
+> 若你更习惯宝塔：网站反代目标填 `http://127.0.0.1:8088`，再开强制 HTTPS。
 
 ---
 

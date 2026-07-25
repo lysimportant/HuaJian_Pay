@@ -46,7 +46,7 @@
 | 微信支付 | ✅ | APIv3 Native；`POST /channels/wxpay/notify` |
 | Admin API | ✅ | `/admin/api/*`（登录、订单、商户、通道配置、重发通知等） |
 | Admin SPA | ✅ | `apps/admin`；**API 进程不托管静态资源** |
-| Docker 多阶段 | ✅ 骨架 | 根目录 `Dockerfile` + `docker-compose.yml`（SQLite volume） |
+| Docker 多阶段 | ✅ | `Dockerfile`（`pnpm deploy`）+ `docker-compose.yml`（SQLite；可选 `--profile web`） |
 | MySQL | ❌ | **未实现** |
 | 个人码收款 | ❌ | **永不作为产品能力** |
 
@@ -63,9 +63,13 @@ HuaJian_Pay/
 ├── package.json              # 根脚本：dev/build/start/typecheck/test:*
 ├── pnpm-workspace.yaml
 ├── .env.example              # 环境变量模板（无真实密钥）
-├── Dockerfile                # 多阶段 API 镜像
-├── docker-compose.yml        # API + SQLite volume；可选 admin-ui
-├── deploy/nginx-admin.conf   # Admin SPA + /admin/api 反代
+├── .env.production.example   # 生产 Compose 推荐 env 模板
+├── Dockerfile                # 多阶段 API 镜像（含 admin-dist）
+├── docker-compose.yml        # API + SQLite volume；可选 --profile web
+├── deploy/
+│   ├── nginx-compose.conf    # Compose 内 Admin SPA + API 反代
+│   ├── nginx-host.conf       # 主机 HTTPS 终止样例
+│   └── nginx-admin.conf      # 兼容别名（同 compose 反代）
 ├── apps/
 │   ├── server/               # @huajian/server — Fastify 支付后端
 │   └── admin/                # @huajian/admin — Vue 管理台
@@ -298,34 +302,40 @@ Admin：`GET/PUT /admin/api/channels/wxpay`；UI 路由 **`/channels/wxpay`**。
 
 常见能力：登录、仪表盘、订单、商户、支付宝/微信通道配置、订单详情与**手动重发商户通知**等。
 
-**部署注意：** server **不** `static` 托管 Admin。生产用 CDN、独立 nginx，或 Compose profile：
+**部署注意：** server **不** `static` 托管 Admin。生产用 CDN、独立 nginx，或 Compose profile **`web`**：
 
 ```bash
-pnpm --filter @huajian/admin build
-docker compose --profile admin-ui up -d
-# 默认 Admin 侧车端口见 compose 中 ADMIN_HOST_PORT（常为 8081）
+cp .env.production.example .env   # 编辑密钥与 APP_URL
+docker compose --profile web up -d --build
+# Admin + 反代：http://SERVER_IP:8088/  （ADMIN_HOST_PORT 默认 8088）
+# API 默认仅本机：127.0.0.1:8080
 ```
 
-`deploy/nginx-admin.conf` 将 `/admin/api/` 反代到 API 容器。
+镜像构建时已打入 Admin `dist`（`/app/admin-dist`）；`admin-dist-init` 同步到 volume，由 nginx 托管。  
+`deploy/nginx-compose.conf` 将 `/admin/api/` 与支付回调路径反代到 `api:8080`。
 
 ---
 
 ## 10. Docker 与 HTTPS
 
-权威说明：**`docs/deployment.md`**。
+权威说明：**`docs/deployment.md`**。手把手服务器步骤：**`docs/guides/server-deployment.md`**。
 
 ### 10.1 构建与运行（SQLite volume）
 
 ```bash
-docker build -t huajian-pay-api:local .
+cp .env.production.example .env
+# 编辑 APP_URL / APP_SECRET / ADMIN_PASSWORD / PLATFORM_KEY / 渠道密钥
+
+docker compose up -d --build                 # 仅 API
 # 或
-docker compose build
-docker compose up -d
+docker compose --profile web up -d --build   # API + Admin(8088)
+
 curl -sS http://127.0.0.1:8080/health
 ```
 
 - 数据卷：`huajian_pay_data` → 容器 `/data`，`DB_DSN=/data/huajian_pay.db`
 - 密钥、`.env`、`*.pem`：**运行时注入**，勿打进镜像（`.dockerignore` 已排除）
+- API 默认绑定 **`127.0.0.1:8080`**（`API_HOST_BIND` / `API_HOST_PORT`）
 
 ### 10.2 无 Docker CLI 时
 
@@ -336,19 +346,20 @@ pnpm test:docker-smoke
 
 ### 10.3 HTTPS / 反代
 
-- TLS 在 Nginx/Caddy/云 LB 终止
+- TLS 在 Nginx/Caddy/云 LB 终止（样例：`deploy/nginx-host.conf`）
 - `APP_URL` 使用 `https://` 公网域名
 - 支付宝/微信 notify 必须可达
 - 微信回调：**原始 body** + `Wechatpay-Signature` 等头不可丢
 
-示例（仅 API）：
+推荐（Compose `web` 后）：
 
 ```nginx
 location / {
-  proxy_pass http://127.0.0.1:8080;
+  proxy_pass http://127.0.0.1:8088;
   proxy_set_header Host $host;
   proxy_set_header X-Forwarded-Proto $scheme;
   proxy_set_header X-Real-IP $remote_addr;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 }
 ```
 

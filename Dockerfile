@@ -1,58 +1,50 @@
-# syntax=docker/dockerfile:1.7
-# HuaJian_Pay multi-stage production image
-# Runtime: Node API + SQLite on VOLUME /data. Secrets at runtime only.
+# syntax=docker/dockerfile:1.6
+# HuaJian_Pay multi-stage image:
+# - builds @huajian/server + @huajian/admin
+# - ships production layout via `pnpm deploy --prod`
+# - also keeps admin SPA dist at /app/admin-dist for compose web profile
 
 ARG NODE_VERSION=20
 
-FROM node:${NODE_VERSION}-bookworm-slim AS base
+# ---------- deps ----------
+FROM node:${NODE_VERSION}-bookworm-slim AS deps
+WORKDIR /src
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
-WORKDIR /app
-
-FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY apps/server/package.json apps/server/package.json
-COPY apps/admin/package.json apps/admin/package.json
-RUN mkdir -p packages \
-  && pnpm install --frozen-lockfile
+COPY apps/server/package.json apps/server/
+COPY apps/admin/package.json apps/admin/
+RUN pnpm install --frozen-lockfile
 
+# ---------- build ----------
 FROM deps AS build
-COPY apps/server apps/server
-COPY apps/admin apps/admin
+WORKDIR /src
+COPY . .
 RUN pnpm --filter @huajian/server build \
-  && pnpm --filter @huajian/admin build \
-  && pnpm --filter @huajian/server deploy --prod /out/server \
-  && test -f /out/server/dist/index.js
+ && pnpm --filter @huajian/admin build \
+ && pnpm --filter @huajian/server deploy --prod /out/server \
+ && mkdir -p /out/admin-dist \
+ && if [ -f apps/admin/dist/index.html ]; then cp -a apps/admin/dist/. /out/admin-dist/; fi
 
+# ---------- runtime ----------
 FROM node:${NODE_VERSION}-bookworm-slim AS runtime
+WORKDIR /app
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=8080 \
-    APP_ENV=production \
     DB_DRIVER=sqlite \
-    DB_DSN=/data/huajian_pay.db \
-    CHANNEL_MODE=mock
+    DB_DSN=/data/huajian_pay.db
 
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates tini \
-  && rm -rf /var/lib/apt/lists/* \
-  && groupadd --system --gid 1001 huajian \
-  && useradd --system --uid 1001 --gid huajian --home /app --create-home huajian \
-  && mkdir -p /data \
-  && chown -R huajian:huajian /data
+RUN groupadd --system --gid 10001 huajian \
+ && useradd --system --uid 10001 --gid huajian --home-dir /app --shell /usr/sbin/nologin huajian \
+ && mkdir -p /data /app/admin-dist \
+ && chown -R huajian:huajian /app /data
 
-WORKDIR /app
-
-# Deployed server package (prod deps + package.json + dist)
-COPY --from=build --chown=huajian:huajian /out/server ./
-# Admin SPA artifacts for extract/CDN/nginx (API does not serve these)
-COPY --from=build --chown=huajian:huajian /app/apps/admin/dist ./admin-dist
+COPY --from=build --chown=huajian:huajian /out/server/ ./
+COPY --from=build --chown=huajian:huajian /out/admin-dist/ ./admin-dist/
 
 USER huajian
 EXPOSE 8080
 VOLUME ["/data"]
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||8080)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-
-ENTRYPOINT ["/usr/bin/tini","--"]
-CMD ["node","dist/index.js"]
+CMD ["node", "dist/index.js"]

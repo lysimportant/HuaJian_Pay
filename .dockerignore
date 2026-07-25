@@ -1,44 +1,26 @@
-# Git / IDE
 .git
 .github
-.idea
 .vscode
-*.md
-!README.md
-
-# Secrets — never bake into image
-.env
-.env.*
-!.env.example
-**/*.pem
-**/*.key
-
-# Dependencies & build outputs (rebuilt in image)
-node_modules
+.idea
+**/.DS_Store
 **/node_modules
 **/dist
 **/.vite
-**/.turbo
-**/coverage
-**/*.tsbuildinfo
-
-# Runtime / local data
+**/*.log
+.env
+.env.*
+!.env.example
+!.env.production.example
+coverage
+tmp
 data
 *.db
-*.db-*
-.tmp
-.tmp*
-tmp
-
-# Admin accidental emit
-apps/admin/src/**/*.js
-apps/admin/src/**/*.js.map
-
-# Tests / scripts not needed for image runtime
-scripts
-docs
-packages
-
-# OS junk
-.DS_Store
-Thumbs.db
+*.sqlite
+docs/assets
+docs/guides/*.docx
+**/*-screenshots
+memory
+.aion*
+AGENTS.md
+**/playwright-report
+**/test-results
