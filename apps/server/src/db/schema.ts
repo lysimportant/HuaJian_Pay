@@ -126,7 +126,12 @@ export const adminUsers = sqliteTable(
     passwordHash: text("password_hash").notNull(),
     /** Display name for UI; optional. */
     displayName: text("display_name").notNull().default(""),
-    role: text("role", { enum: ["admin", "viewer"] }).notNull().default("admin"),
+    /** super_admin | admin 可管理账号；viewer=普通用户仅 /me */
+    role: text("role", {
+      enum: ["super_admin", "admin", "viewer"],
+    })
+      .notNull()
+      .default("admin"),
     status: text("status", { enum: ["active", "disabled"] })
       .notNull()
       .default("active"),

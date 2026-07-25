@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { and, desc, eq, or, sql } from "drizzle-orm";
+import { and, desc, eq, like, or, sql } from "drizzle-orm";
 import { env } from "../config/env.js";
 import {
   channelConfigs,
@@ -39,6 +39,19 @@ const PASSWORD_MIN = 8;
 /** Roles that can manage other accounts and privileged ops (admin|super_admin). */
 function isManagerRole(role: string): boolean {
   return role === "super_admin" || role === "admin";
+}
+
+function isPrivilegedRole(role: string): boolean {
+  return isManagerRole(role);
+}
+
+function normalizeRole(
+  input: unknown,
+): "super_admin" | "admin" | "viewer" | null {
+  if (input === "super_admin" || input === "admin" || input === "viewer") {
+    return input;
+  }
+  return null;
 }
 
 function toPublicAdminUser(u: {
@@ -182,11 +195,6 @@ async function requireAccountManager(req: FastifyRequest, reply: FastifyReply) {
   return ctx;
 }
 
-/** @deprecated alias — use requireAccountManager */
-async function requireSuperAdmin(req: FastifyRequest, reply: FastifyReply) {
-  return requireAccountManager(req, reply);
-}
-
 async function countActivePrivilegedAdmins(): Promise<number> {
   const db = getDb();
   const rows = await db
@@ -202,10 +210,6 @@ async function countActivePrivilegedAdmins(): Promise<number> {
       ),
     );
   return Number(rows[0]?.c ?? 0);
-}
-
-async function countActiveAdmins(): Promise<number> {
-  return countActivePrivilegedAdmins();
 }
 
 function maskKey(key: string): string {
@@ -441,23 +445,79 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
-  // —— Multi-admin user management (role=admin only) ——
+  // —— Multi-admin CRUD (super_admin/admin)；viewer 禁止 ——
   app.get("/admin/api/admin-users", async (req, reply) => {
-    const session = await requireSuperAdmin(req, reply);
+    const session = await requireAccountManager(req, reply);
     if (!session) return;
+    const q = req.query as {
+      keyword?: string;
+      role?: string;
+      status?: string;
+    };
     const db = getDb();
-    const rows = await db
-      .select()
-      .from(adminUsers)
-      .orderBy(desc(adminUsers.id));
+    const conds = [];
+    const keyword = (q.keyword || "").trim();
+    if (keyword) {
+      const pattern = "%" + keyword.replace(/%/g, "") + "%";
+      conds.push(
+        or(
+          like(adminUsers.username, pattern),
+          like(adminUsers.displayName, pattern),
+        )!,
+      );
+    }
+    if (q.role) {
+      const r = normalizeRole(q.role);
+      if (!r) {
+        return reply
+          .code(400)
+          .send({ code: 400, msg: "角色参数无效（super_admin|admin|viewer）" });
+      }
+      conds.push(eq(adminUsers.role, r));
+    }
+    if (q.status) {
+      if (q.status !== "active" && q.status !== "disabled") {
+        return reply
+          .code(400)
+          .send({ code: 400, msg: "状态参数无效（active|disabled）" });
+      }
+      conds.push(eq(adminUsers.status, q.status));
+    }
+    const rows =
+      conds.length > 0
+        ? await db
+            .select()
+            .from(adminUsers)
+            .where(and(...conds))
+            .orderBy(desc(adminUsers.id))
+        : await db.select().from(adminUsers).orderBy(desc(adminUsers.id));
     return {
       code: 0,
       list: rows.map((u) => toPublicAdminUser(u)),
     };
   });
 
+  app.get("/admin/api/admin-users/:id", async (req, reply) => {
+    const session = await requireAccountManager(req, reply);
+    if (!session) return;
+    const id = Number((req.params as { id?: string }).id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return reply.code(400).send({ code: 400, msg: "无效的用户 ID" });
+    }
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(adminUsers)
+      .where(eq(adminUsers.id, id))
+      .limit(1);
+    if (!rows[0]) {
+      return reply.code(404).send({ code: 404, msg: "用户不存在" });
+    }
+    return { code: 0, user: toPublicAdminUser(rows[0]) };
+  });
+
   app.post("/admin/api/admin-users", async (req, reply) => {
-    const session = await requireSuperAdmin(req, reply);
+    const session = await requireAccountManager(req, reply);
     if (!session) return;
     const body = (req.body ?? {}) as {
       username?: string;
@@ -468,14 +528,28 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const username = (body.username || "").trim();
     const password = body.password || "";
     const displayName = String(body.display_name ?? "").trim();
-    const role = body.role === "viewer" ? "viewer" : "admin";
+    let role: "admin" | "viewer" = "admin";
+    if (body.role !== undefined) {
+      if (body.role === "viewer") role = "viewer";
+      else if (body.role === "admin") role = "admin";
+      else if (body.role === "super_admin") {
+        return reply.code(400).send({
+          code: 400,
+          msg: "不能通过接口创建超级管理员，请选择管理员或普通用户",
+        });
+      } else {
+        return reply
+          .code(400)
+          .send({ code: 400, msg: "角色无效（admin|viewer）" });
+      }
+    }
 
     const uerr = validateUsername(username);
     if (uerr) return reply.code(400).send({ code: 400, msg: uerr });
     const perr = validatePasswordPolicy(password);
     if (perr) return reply.code(400).send({ code: 400, msg: perr });
     if (displayName.length > 64) {
-      return reply.code(400).send({ code: 400, msg: "display_name too long" });
+      return reply.code(400).send({ code: 400, msg: "显示名过长（最多 64 字）" });
     }
 
     const db = getDb();
@@ -485,7 +559,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       .where(eq(adminUsers.username, username))
       .limit(1);
     if (clash.length > 0) {
-      return reply.code(409).send({ code: 409, msg: "username already taken" });
+      return reply.code(409).send({ code: 409, msg: "用户名已存在" });
     }
 
     const now = Date.now();
@@ -511,20 +585,21 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (/unique/i.test(msg)) {
-        return reply.code(409).send({ code: 409, msg: "username already taken" });
+        return reply.code(409).send({ code: 409, msg: "用户名已存在" });
       }
       throw err;
     }
   });
 
   app.patch("/admin/api/admin-users/:id", async (req, reply) => {
-    const session = await requireSuperAdmin(req, reply);
+    const session = await requireAccountManager(req, reply);
     if (!session) return;
     const id = Number((req.params as { id?: string }).id);
     if (!Number.isFinite(id) || id <= 0) {
-      return reply.code(400).send({ code: 400, msg: "invalid id" });
+      return reply.code(400).send({ code: 400, msg: "无效的用户 ID" });
     }
     const body = (req.body ?? {}) as {
+      username?: string;
       display_name?: string;
       role?: string;
       status?: string;
@@ -537,12 +612,23 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       .limit(1);
     const target = rows[0];
     if (!target) {
-      return reply.code(404).send({ code: 404, msg: "user not found" });
+      return reply.code(404).send({ code: 404, msg: "用户不存在" });
+    }
+
+    if (
+      target.role === "super_admin" &&
+      session.user.role !== "super_admin" &&
+      session.user.id !== target.id
+    ) {
+      return reply
+        .code(403)
+        .send({ code: 403, msg: "仅超级管理员可修改超级管理员账号" });
     }
 
     const patch: {
+      username?: string;
       displayName?: string;
-      role?: "admin" | "viewer";
+      role?: "super_admin" | "admin" | "viewer";
       status?: "active" | "disabled";
       tokenVersion?: number;
       updatedAt: number;
@@ -551,63 +637,83 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (body.display_name !== undefined) {
       const dn = String(body.display_name).trim();
       if (dn.length > 64) {
-        return reply.code(400).send({ code: 400, msg: "display_name too long" });
+        return reply
+          .code(400)
+          .send({ code: 400, msg: "显示名过长（最多 64 字）" });
       }
       patch.displayName = dn;
     }
-    if (body.role !== undefined) {
-      if (body.role !== "admin" && body.role !== "viewer") {
-        return reply.code(400).send({ code: 400, msg: "role must be admin|viewer" });
+
+    if (body.username !== undefined) {
+      const un = String(body.username).trim();
+      const uerr = validateUsername(un);
+      if (uerr) return reply.code(400).send({ code: 400, msg: uerr });
+      if (un !== target.username) {
+        const clash = await db
+          .select({ id: adminUsers.id })
+          .from(adminUsers)
+          .where(eq(adminUsers.username, un))
+          .limit(1);
+        if (clash.length > 0) {
+          return reply.code(409).send({ code: 409, msg: "用户名已存在" });
+        }
+        patch.username = un;
       }
-      patch.role = body.role;
     }
+
+    let nextRole = target.role as "super_admin" | "admin" | "viewer";
+    if (body.role !== undefined) {
+      const r = normalizeRole(body.role);
+      if (!r) {
+        return reply
+          .code(400)
+          .send({ code: 400, msg: "角色无效（super_admin|admin|viewer）" });
+      }
+      if (r === "super_admin" && session.user.role !== "super_admin") {
+        return reply
+          .code(403)
+          .send({ code: 403, msg: "仅超级管理员可分配超级管理员角色" });
+      }
+      if (
+        target.role === "super_admin" &&
+        r !== "super_admin" &&
+        session.user.role !== "super_admin"
+      ) {
+        return reply
+          .code(403)
+          .send({ code: 403, msg: "仅超级管理员可调整超级管理员角色" });
+      }
+      nextRole = r;
+      patch.role = r;
+    }
+
+    let nextStatus = target.status as "active" | "disabled";
     if (body.status !== undefined) {
       if (body.status !== "active" && body.status !== "disabled") {
         return reply
           .code(400)
-          .send({ code: 400, msg: "status must be active|disabled" });
+          .send({ code: 400, msg: "状态无效（active|disabled）" });
       }
-      // Cannot disable the last active privileged admin (admin|super_admin)
-      if (
-        body.status === "disabled" &&
-        target.status === "active" &&
-        isManagerRole(target.role)
-      ) {
-        const activeAdmins = await countActiveAdmins();
-        if (activeAdmins <= 1) {
-          return reply.code(400).send({
-            code: 400,
-            msg: "cannot disable the last active admin",
-          });
-        }
-      }
+      nextStatus = body.status;
       patch.status = body.status;
-      // Disable → bump token version so sessions die
       if (body.status === "disabled") {
         patch.tokenVersion = (target.tokenVersion ?? 0) + 1;
       }
     }
 
-    // Demoting last privileged admin is blocked (role change alone or with status)
-    if (
-      body.role === "viewer" &&
-      isManagerRole(target.role) &&
-      target.status === "active" &&
-      (body.status === undefined || body.status === "active")
-    ) {
-      const activeAdmins = await countActiveAdmins();
-      if (activeAdmins <= 1) {
+    const wasPrivilegedActive =
+      target.status === "active" && isPrivilegedRole(target.role);
+    const willBePrivilegedActive =
+      nextStatus === "active" && isPrivilegedRole(nextRole);
+
+    if (wasPrivilegedActive && !willBePrivilegedActive) {
+      const n = await countActivePrivilegedAdmins();
+      if (n <= 1) {
         return reply.code(400).send({
           code: 400,
-          msg: "cannot demote the last active admin",
+          msg: "不能禁用或降级最后一个有效管理员",
         });
       }
-    }
-
-    // Role/status change invalidates existing sessions for that account
-    if (body.role !== undefined || body.status === "disabled") {
-      patch.tokenVersion =
-        patch.tokenVersion ?? (target.tokenVersion ?? 0) + 1;
     }
 
     const updated = await db
@@ -618,16 +724,15 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return { code: 0, msg: "ok", user: toPublicAdminUser(updated[0]) };
   });
 
-  /** Hard-delete account with last-admin and self-delete guards. */
   app.delete("/admin/api/admin-users/:id", async (req, reply) => {
     const session = await requireAccountManager(req, reply);
     if (!session) return;
     const id = Number((req.params as { id?: string }).id);
     if (!Number.isFinite(id) || id <= 0) {
-      return reply.code(400).send({ code: 400, msg: "invalid id" });
+      return reply.code(400).send({ code: 400, msg: "无效的用户 ID" });
     }
     if (id === session.user.id) {
-      return reply.code(400).send({ code: 400, msg: "cannot delete yourself" });
+      return reply.code(400).send({ code: 400, msg: "不能删除当前登录账号" });
     }
     const db = getDb();
     const rows = await db
@@ -637,14 +742,22 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       .limit(1);
     const target = rows[0];
     if (!target) {
-      return reply.code(404).send({ code: 404, msg: "user not found" });
+      return reply.code(404).send({ code: 404, msg: "用户不存在" });
     }
-    if (target.status === "active" && isManagerRole(target.role)) {
-      const activeAdmins = await countActiveAdmins();
-      if (activeAdmins <= 1) {
+    if (
+      target.role === "super_admin" &&
+      session.user.role !== "super_admin"
+    ) {
+      return reply
+        .code(403)
+        .send({ code: 403, msg: "仅超级管理员可删除超级管理员账号" });
+    }
+    if (target.status === "active" && isPrivilegedRole(target.role)) {
+      const n = await countActivePrivilegedAdmins();
+      if (n <= 1) {
         return reply.code(400).send({
           code: 400,
-          msg: "cannot delete the last active admin",
+          msg: "不能删除最后一个有效管理员",
         });
       }
     }
@@ -653,11 +766,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post("/admin/api/admin-users/:id/reset-password", async (req, reply) => {
-    const session = await requireSuperAdmin(req, reply);
+    const session = await requireAccountManager(req, reply);
     if (!session) return;
     const id = Number((req.params as { id?: string }).id);
     if (!Number.isFinite(id) || id <= 0) {
-      return reply.code(400).send({ code: 400, msg: "invalid id" });
+      return reply.code(400).send({ code: 400, msg: "无效的用户 ID" });
     }
     const body = (req.body ?? {}) as { new_password?: string };
     const newPassword = body.new_password || "";
@@ -671,7 +784,15 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       .where(eq(adminUsers.id, id))
       .limit(1);
     if (!rows[0]) {
-      return reply.code(404).send({ code: 404, msg: "user not found" });
+      return reply.code(404).send({ code: 404, msg: "用户不存在" });
+    }
+    if (
+      rows[0].role === "super_admin" &&
+      session.user.role !== "super_admin"
+    ) {
+      return reply
+        .code(403)
+        .send({ code: 403, msg: "仅超级管理员可重置超级管理员密码" });
     }
     const now = Date.now();
     const nextTv = (rows[0].tokenVersion ?? 0) + 1;
@@ -684,7 +805,6 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       })
       .where(eq(adminUsers.id, id))
       .returning();
-    // Never return the password; only public user fields
     return { code: 0, msg: "ok", user: toPublicAdminUser(updated[0]) };
   });
 
