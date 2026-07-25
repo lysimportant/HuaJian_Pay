@@ -118,34 +118,31 @@ docker compose --profile web up -d --build
 3. `admin-static`（nginx）挂载该 volume + `deploy/nginx-compose.conf`
 4. 默认暴露 **`0.0.0.0:8088`**（`ADMIN_HOST_BIND` / `ADMIN_HOST_PORT`）
 
-生产推荐：主机 Nginx/Caddy 终止 TLS，反代到 `127.0.0.1:8088`（见 §5）。  
+生产推荐：主机 Nginx 终止 TLS + 托管 Admin 静态，API 反代到 `127.0.0.1:8080`（见 §5）。  
 CDN 方案仍可用：只跑 `api`，Admin 静态单独发布。
 
 ---
 
 ## 5. 反向代理（TLS 终止）
 
-Compose **不会**在容器内做 HTTPS。TLS 必须在**主机 Nginx/Caddy** 终止。
+**推荐生产：Docker 只跑 API**，主机 Nginx 负责 HTTPS + Admin 静态。
 
-当前推荐域名：**`https://pay.sui.lianghj.top`**
-
-- 上游：Compose profile `web` → **`127.0.0.1:8088`**（Admin SPA + 同域反代 API）
-- 首次签证书：`deploy/nginx-host-bootstrap.conf`（仅 HTTP）→ `certbot --nginx -d pay.sui.lianghj.top`
-- 正式 HTTPS：`deploy/nginx-host.conf`（HTTP 跳转 HTTPS + 443 反代）
-- `.env` 中 `APP_URL=https://pay.sui.lianghj.top`；`ADMIN_HOST_BIND=127.0.0.1` 避免 8088 直接暴露公网
+- Compose：`docker compose up -d --build` → **`127.0.0.1:8080`**
+- Admin：`pnpm --filter @huajian/admin build`，把 `apps/admin/dist/` 同步到 **`/var/www/huajian-admin/`**
+- 域名：**`https://pay.sui.lianghj.top`**
+- 配置：`deploy/nginx-host.conf`（上游 **8080**，不是 8088）
+- 首次签证书：`deploy/nginx-host-bootstrap.conf` → `certbot --nginx -d pay.sui.lianghj.top`
 
 ```nginx
 # 主机 Nginx 核心（完整见 deploy/nginx-host.conf）
-location / {
-  proxy_pass http://127.0.0.1:8088;
-  proxy_set_header Host $host;
-  proxy_set_header X-Forwarded-Proto https;
-  proxy_set_header X-Real-IP $remote_addr;
-  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-}
+location /admin/api/ { proxy_pass http://127.0.0.1:8080; ... }
+location ~ ^/(health|channels/|submit\.php|...) { proxy_pass http://127.0.0.1:8080; ... }
+location / { try_files $uri /index.html; }  # root = /var/www/huajian-admin
 ```
 
 `APP_URL` 与支付 notify/return **必须**为公网 HTTPS。
+
+可选：`docker compose --profile web` 在容器内再挂 Admin（8088），一般不需要。
 
 ## 6. MySQL（明确未实现）
 

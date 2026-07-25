@@ -41,11 +41,11 @@
  主机 Nginx（TLS 终止，443）
         │
         ▼
-  Compose profile web → 127.0.0.1:8088
+  Docker API only → 127.0.0.1:8080
    ┌────┴────┐
    │         │
- Admin SPA   反代 API（容器内）
- nginx静态    api:8080
+ 主机静态 Admin   反代 API
+ /var/www/huajian-admin    127.0.0.1:8080
              │
              ▼
       Docker: HuaJian API
@@ -188,7 +188,7 @@ chmod 600 .env
 ### 6.2 启动 API + Admin Web
 
 ```bash
-docker compose --profile web up -d --build
+docker compose up -d --build
 ```
 
 这会启动：
