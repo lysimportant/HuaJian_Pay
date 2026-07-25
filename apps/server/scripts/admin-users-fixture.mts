@@ -13,7 +13,7 @@ process.env.CHANNEL_MODE = "mock";
 process.env.DB_DRIVER = "sqlite";
 process.env.DB_DSN = resolve(dataDir, `test-${Date.now()}.db`);
 process.env.ADMIN_USERNAME = "admin";
-process.env.ADMIN_PASSWORD = "admin12345";
+process.env.ADMIN_PASSWORD = "12345678";
 process.env.PORT = "0";
 
 const { buildApp } = await import("../src/app.js");
@@ -64,7 +64,7 @@ assert(
 
 // login seed super_admin
 const login = await json(app, "POST", "/admin/api/login", {
-  body: { username: "admin", password: "admin12345" },
+  body: { username: "admin", password: "12345678" },
 });
 assert(login.status === 200 && login.body.code === 0, "login failed");
 const token1 = String(login.body.token);
@@ -144,7 +144,7 @@ assert(vCreate.status === 403, "viewer create forbidden");
 // password change revokes old token
 const pw = await json(app, "PUT", "/admin/api/me/password", {
   token: token1,
-  body: { old_password: "admin12345", new_password: "admin99999" },
+  body: { current_password: "12345678", new_password: "admin99999" },
 });
 assert(pw.status === 200 && pw.body.token, "password change");
 const token2 = String(pw.body.token);

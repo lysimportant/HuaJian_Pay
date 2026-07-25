@@ -49,7 +49,7 @@ export const env = {
   dbDsn: optional("DB_DSN", "./data/huajian_pay.db"),
 
   adminUsername: optional("ADMIN_USERNAME", "admin"),
-  adminPassword: required("ADMIN_PASSWORD", "change-me"),
+  adminPassword: required("ADMIN_PASSWORD", "12345678"),
 
   platformPid: optional("PLATFORM_PID", "1000"),
   platformKey: required("PLATFORM_KEY", "change-me-merchant-key"),

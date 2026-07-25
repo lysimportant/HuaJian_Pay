@@ -36,7 +36,7 @@ const BASE = (process.env.BASE_URL || DEFAULT_BASE).replace(/\/$/, "");
 const PID = process.env.PID || "1000";
 const KEY = process.env.KEY || "change-me-merchant-key";
 const ADMIN_USER = process.env.ADMIN_USERNAME || "admin";
-const ADMIN_PASS = process.env.ADMIN_PASSWORD || "admin123";
+const ADMIN_PASS = process.env.ADMIN_PASSWORD || "12345678";
 const SKIP_SERVER_START = process.env.SKIP_SERVER_START === "1";
 const START_TIMEOUT_MS = Number(process.env.E2E_START_TIMEOUT_MS || 60_000);
 const HEALTH_INTERVAL_MS = 400;

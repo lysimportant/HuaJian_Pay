@@ -185,7 +185,7 @@ pnpm test:mock-e2e
 
 | 变量 | 说明 |
 | --- | --- |
-| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | 后台登录 |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | 后台登录；空库 seed 默认 `admin` / `12345678`（生产务必修改；已有库不自动改密） |
 | `PLATFORM_PID` / `PLATFORM_KEY` | 默认易支付商户号与密钥（给 newapi 用） |
 
 ### 6.5 支付宝（`CHANNEL_MODE=alipay` 或下单 type=alipay）

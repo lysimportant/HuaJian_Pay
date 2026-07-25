@@ -100,7 +100,7 @@
 | `APP_ENV=production` | **[Target]** ops |
 | `CHANNEL_MODE` ≠ `mock` on internet prod | **[Target]** ops + code guard |
 | `APP_URL` public **https://** | **[Target]** ops |
-| Rotate `ADMIN_PASSWORD` from example; ≥ 16 chars | **[Target]** ops |
+| Rotate `ADMIN_PASSWORD` from example; ≥ 16 chars | **[Target]** ops |（fresh seed 默认 12345678，上线前必须修改）
 | High-entropy `PLATFORM_KEY` + rotation runbook | **[Target]** ops |
 | Alipay keys + HTTPS notify on owned domain | **[Target]** ops |
 | Protect `APP_SECRET` (forges all admin tokens if leaked) | **[Implemented]** used for HMAC · **[Target]** rotation kills outstanding Bearers |
