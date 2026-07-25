@@ -170,23 +170,9 @@ async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
   return { ...session, user };
 }
 
-/**
- * Privileged ops: channel secrets, merchants, notify resend, etc.
- * Viewers must not reach these endpoints.
- */
-async function requireAdmin(req: FastifyRequest, reply: FastifyReply) {
-  const ctx = await requireAuth(req, reply);
-  if (!ctx) return null;
-  if (!isManagerRole(ctx.user.role)) {
-    reply.code(403).send({ code: 403, msg: "权限不足：需要管理员角色" });
-    return null;
-  }
-  return ctx;
-}
-
-/** super_admin 或 admin 可管理账号；viewer 禁止。 */
+/** super_admin 或 admin 可管理账号；viewer 只在账号管理功能中受限。 */
 async function requireAccountManager(req: FastifyRequest, reply: FastifyReply) {
-  const ctx = await requireAdmin(req, reply);
+  const ctx = await requireAuth(req, reply);
   if (!ctx) return null;
   if (!isManagerRole(ctx.user.role)) {
     reply.code(403).send({ code: 403, msg: "权限不足，普通用户无法管理账号" });
@@ -287,27 +273,36 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(403).send({ code: 403, msg: "账号已禁用" });
     }
 
+    // A successful login rotates tokenVersion atomically. Only the newest web
+    // login for this account remains valid; every earlier browser token fails
+    // requireAuth on its next request.
+    const now = Date.now();
+    const loggedInRows = await db
+      .update(adminUsers)
+      .set({
+        tokenVersion: sql`${adminUsers.tokenVersion} + 1`,
+        updatedAt: now,
+      })
+      .where(eq(adminUsers.id, user.id))
+      .returning();
+    const loggedInUser = loggedInRows[0];
+    if (!loggedInUser) {
+      return reply.code(500).send({ code: 500, msg: "登录状态更新失败" });
+    }
+
     const token = signToken({
-      sub: user.id,
-      username: user.username,
-      role: user.role,
-      tv: user.tokenVersion ?? 0,
-      exp: Date.now() + 12 * 60 * 60 * 1000,
+      sub: loggedInUser.id,
+      username: loggedInUser.username,
+      role: loggedInUser.role,
+      tv: loggedInUser.tokenVersion,
+      exp: now + 12 * 60 * 60 * 1000,
     });
 
     return {
       code: 0,
       msg: "ok",
       token,
-      user: toPublicAdminUser({
-        id: user.id,
-        username: user.username,
-        displayName: user.displayName ?? "",
-        role: user.role,
-        status: user.status ?? "active",
-        createdAt: user.createdAt,
-        updatedAt: user.updatedAt,
-      }),
+      user: toPublicAdminUser(loggedInUser),
     };
   });
 
@@ -919,7 +914,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post("/admin/api/orders/:tradeNo/notify/resend", async (req, reply) => {
-    const session = await requireAdmin(req, reply);
+    const session = await requireAuth(req, reply);
     if (!session) return;
 
     const { tradeNo } = req.params as { tradeNo: string };
@@ -948,8 +943,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.get("/admin/api/channels/alipay", async (req, reply) => {
-    // Config view is redacted; still require admin (not viewer) — secrets surface area.
-    const session = await requireAdmin(req, reply);
+    // All authenticated console users may operate payment channels; secret
+    // values remain redacted and are never echoed by this endpoint.
+    const session = await requireAuth(req, reply);
     if (!session) return;
     const db = getDb();
     const rows = await db
@@ -976,7 +972,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.put("/admin/api/channels/alipay", async (req, reply) => {
-    const session = await requireAdmin(req, reply);
+    const session = await requireAuth(req, reply);
     if (!session) return;
     const body = (req.body ?? {}) as Record<string, unknown>;
     const db = getDb();
@@ -1105,7 +1101,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   }
 
   app.get("/admin/api/channels/wxpay", async (req, reply) => {
-    const session = await requireAdmin(req, reply);
+    const session = await requireAuth(req, reply);
     if (!session) return;
     const db = getDb();
     const rows = await db
@@ -1132,7 +1128,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.put("/admin/api/channels/wxpay", async (req, reply) => {
-    const session = await requireAdmin(req, reply);
+    const session = await requireAuth(req, reply);
     if (!session) return;
     const body = (req.body ?? {}) as Record<string, unknown>;
     const db = getDb();
@@ -1231,7 +1227,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.get("/admin/api/merchants", async (req, reply) => {
-    const session = await requireAdmin(req, reply);
+    const session = await requireAuth(req, reply);
     if (!session) return;
     const db = getDb();
     const rows = await db.select().from(merchants).orderBy(desc(merchants.id));
@@ -1249,7 +1245,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post("/admin/api/merchants", async (req, reply) => {
-    const session = await requireAdmin(req, reply);
+    const session = await requireAuth(req, reply);
     if (!session) return;
     const body = (req.body ?? {}) as { name?: string; pid?: string };
     const name = body.name?.trim() || "Merchant";

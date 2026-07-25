@@ -108,8 +108,11 @@ assert(
   "topbar account entry to profile",
 );
 assert(
-  layout.includes("canWriteConfig") || layout.includes("viewer"),
-  "viewer write-channel gate",
+  layout.includes("/channels/alipay") &&
+    layout.includes("/channels/wxpay") &&
+    layout.includes("/merchants") &&
+    !layout.includes("canWriteConfig"),
+  "ordinary users retain payment-channel and merchant menus",
 );
 pass("AdminLayout route animation / router-view / theme / profile entry");
 

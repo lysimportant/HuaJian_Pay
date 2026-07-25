@@ -100,8 +100,25 @@ const ops = await json(app, "POST", "/admin/api/admin-users", {
 assert(ops.status === 200 && ops.body.code === 0, "create admin");
 const opsId = (ops.body.user as { id: number }).id;
 
+// A second web login for the same account invalidates the first browser token.
+const secondLogin = await json(app, "POST", "/admin/api/login", {
+  body: { username: "admin", password: "12345678" },
+});
+assert(secondLogin.status === 200, "second login");
+const activeToken = String(secondLogin.body.token);
+const displacedSession = await json(app, "GET", "/admin/api/me", {
+  token: token1,
+});
+assert(displacedSession.status === 401, "older browser session must be displaced");
+const activeSession = await json(app, "GET", "/admin/api/me", {
+  token: activeToken,
+});
+assert(activeSession.status === 200, "newest browser session must remain active");
+
 // list + filter
-const list = await json(app, "GET", "/admin/api/admin-users", { token: token1 });
+const list = await json(app, "GET", "/admin/api/admin-users", {
+  token: activeToken,
+});
 assert(
   list.status === 200 &&
     Array.isArray(list.body.list) &&
@@ -119,7 +136,7 @@ const filtered = await json(
   app,
   "GET",
   "/admin/api/admin-users?role=viewer&keyword=viewer",
-  { token: token1 },
+  { token: activeToken },
 );
 assert(filtered.status === 200, "filter list");
 const fl = filtered.body.list as Array<{ username: string; role: string }>;
@@ -155,14 +172,33 @@ const vCreate = await json(app, "POST", "/admin/api/admin-users", {
 });
 assert(vCreate.status === 403, "viewer create forbidden");
 
+// Ordinary users may use payment channels and merchant/payment operations.
+const vAlipay = await json(app, "GET", "/admin/api/channels/alipay", {
+  token: vToken,
+});
+assert(vAlipay.status === 200, "viewer can read alipay channel");
+const vAlipayUpdate = await json(app, "PUT", "/admin/api/channels/alipay", {
+  token: vToken,
+  body: { enabled: true },
+});
+assert(vAlipayUpdate.status === 200, "viewer can update alipay channel");
+const vWxpay = await json(app, "GET", "/admin/api/channels/wxpay", {
+  token: vToken,
+});
+assert(vWxpay.status === 200, "viewer can read wxpay channel");
+const vMerchants = await json(app, "GET", "/admin/api/merchants", {
+  token: vToken,
+});
+assert(vMerchants.status === 200, "viewer can use merchant/payment operations");
+
 // password change revokes old token
 const pw = await json(app, "PUT", "/admin/api/me/password", {
-  token: token1,
+  token: activeToken,
   body: { current_password: "12345678", new_password: "admin99999" },
 });
 assert(pw.status === 200 && pw.body.token, "password change");
 const token2 = String(pw.body.token);
-const revoked = await json(app, "GET", "/admin/api/me", { token: token1 });
+const revoked = await json(app, "GET", "/admin/api/me", { token: activeToken });
 assert(revoked.status === 401, "old token must be revoked");
 const me2 = await json(app, "GET", "/admin/api/me", { token: token2 });
 assert(me2.status === 200, "new token works");

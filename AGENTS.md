@@ -63,14 +63,15 @@ Roles:
 
 - `super_admin`: full account and system administration.
 - `admin`: account management and write operations allowed by the backend permission matrix.
-- `viewer`: personal profile/password and explicitly allowed read-only functions only.
+- `viewer`: ordinary console user; may use payment channels, orders, merchants, Dashboard and settings, but may not view or operate account management.
 
 Mandatory rules:
 
 - Unknown, missing, stale or failed-to-load roles are treated as `viewer`, never as an administrator.
 - Account management UI renders only after `/admin/api/me` succeeds and the returned role is exactly `admin` or `super_admin`.
-- A viewer must never see account list/create/edit/delete controls.
-- Frontend hiding is not authorization. Account APIs must independently return `403` for viewers.
+- A viewer must never see account list/create/edit/delete controls, but must retain access to payment-channel and other non-account business features.
+- Frontend hiding is not authorization. Only account-management APIs must independently return `403` for viewers.
+- One account may have only one active browser login; every successful login must invalidate the account's previous browser token.
 - `/admin/api/me` and other identity-sensitive Admin responses must be non-cacheable and vary by authorization so switching accounts cannot reuse the previous administrator profile.
 - Prevent deleting/disabling the current account and the final enabled administrator.
 - Username, role, status and password changes must invalidate prior tokens when required.

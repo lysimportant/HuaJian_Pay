@@ -45,29 +45,20 @@ const isNarrow = ref(false)
 const me = ref<MeUser | null>(null)
 const { mode, isDark, setMode, toggleLightDark } = useTheme()
 
-/** viewer 隐藏写通道/商户；账号管理仅在 Profile 内 gate */
-const canWriteConfig = computed(() => me.value?.role !== 'viewer')
-
+/** 普通用户可使用支付业务；账号管理仅在 Profile 内单独 gate。 */
 function icon(comp: unknown) {
   return () => h(NIcon, null, { default: () => h(comp as object) })
 }
 
-const menuOptions = computed<MenuOption[]>(() => {
-  const items: MenuOption[] = [
-    { label: '仪表盘', key: '/dashboard', icon: icon(HomeOutline) },
-    { label: '订单中心', key: '/orders', icon: icon(ReceiptOutline) },
-  ]
-  if (canWriteConfig.value) {
-    items.push(
-      { label: '支付宝通道', key: '/channels/alipay', icon: icon(LogoAlipay) },
-      { label: '微信通道', key: '/channels/wxpay', icon: icon(LogoWechat) },
-      { label: '商户管理', key: '/merchants', icon: icon(PeopleOutline) },
-    )
-  }
-  items.push({ label: '系统设置', key: '/settings', icon: icon(SettingsOutline) })
+const menuOptions = computed<MenuOption[]>(() => [
+  { label: '仪表盘', key: '/dashboard', icon: icon(HomeOutline) },
+  { label: '订单中心', key: '/orders', icon: icon(ReceiptOutline) },
+  { label: '支付宝通道', key: '/channels/alipay', icon: icon(LogoAlipay) },
+  { label: '微信通道', key: '/channels/wxpay', icon: icon(LogoWechat) },
+  { label: '商户管理', key: '/merchants', icon: icon(PeopleOutline) },
+  { label: '系统设置', key: '/settings', icon: icon(SettingsOutline) },
   // 侧栏不出现「个人信息」——仅顶栏账号菜单
-  return items
-})
+])
 
 const activeKey = computed(() => {
   const p = route.path
