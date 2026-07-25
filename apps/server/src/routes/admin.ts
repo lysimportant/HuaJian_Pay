@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, or, sql } from "drizzle-orm";
 import { env } from "../config/env.js";
 import {
   channelConfigs,
@@ -36,6 +36,11 @@ type PublicAdminUser = {
 
 const PASSWORD_MIN = 8;
 
+/** Roles that can manage other accounts and privileged ops (admin|super_admin). */
+function isManagerRole(role: string): boolean {
+  return role === "super_admin" || role === "admin";
+}
+
 function toPublicAdminUser(u: {
   id: number;
   username: string;
@@ -58,14 +63,14 @@ function toPublicAdminUser(u: {
 
 function validatePasswordPolicy(password: string): string | null {
   if (password.length < PASSWORD_MIN) {
-    return `password must be at least ${PASSWORD_MIN} characters`;
+    return `密码长度至少 ${PASSWORD_MIN} 位`;
   }
   return null;
 }
 
 function validateUsername(username: string): string | null {
   if (!/^[a-zA-Z0-9_]{3,32}$/.test(username)) {
-    return "username must be 3-32 chars [a-zA-Z0-9_]";
+    return "用户名须为 3-32 位字母、数字或下划线";
   }
   return null;
 }
@@ -119,15 +124,16 @@ function getBearer(req: FastifyRequest): string | null {
   return m?.[1] ?? null;
 }
 
-async function requireAdmin(req: FastifyRequest, reply: FastifyReply) {
+/** Any authenticated console user (admin | viewer | super_admin). */
+async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
   const token = getBearer(req);
   if (!token) {
-    reply.code(401).send({ code: 401, msg: "unauthorized" });
+    reply.code(401).send({ code: 401, msg: "未授权，请先登录" });
     return null;
   }
   const session = verifyToken(token);
   if (!session) {
-    reply.code(401).send({ code: 401, msg: "unauthorized" });
+    reply.code(401).send({ code: 401, msg: "登录已失效，请重新登录" });
     return null;
   }
 
@@ -139,37 +145,67 @@ async function requireAdmin(req: FastifyRequest, reply: FastifyReply) {
     .limit(1);
   const user = rows[0];
   if (!user || user.status !== "active") {
-    reply.code(401).send({ code: 401, msg: "unauthorized" });
+    reply.code(401).send({ code: 401, msg: "账号不可用或已禁用" });
     return null;
   }
   // Missing tv (legacy tokens) or mismatched version → force re-login
   if (typeof session.tv !== "number" || session.tv !== user.tokenVersion) {
-    reply.code(401).send({ code: 401, msg: "token revoked" });
+    reply.code(401).send({ code: 401, msg: "凭证已失效，请重新登录" });
     return null;
   }
   // Flat shape keeps existing call sites (`session.sub`) working
   return { ...session, user };
 }
 
-async function requireSuperAdmin(req: FastifyRequest, reply: FastifyReply) {
-  const ctx = await requireAdmin(req, reply);
+/**
+ * Privileged ops: channel secrets, merchants, notify resend, etc.
+ * Viewers must not reach these endpoints.
+ */
+async function requireAdmin(req: FastifyRequest, reply: FastifyReply) {
+  const ctx = await requireAuth(req, reply);
   if (!ctx) return null;
-  if (ctx.user.role !== "admin") {
-    reply.code(403).send({ code: 403, msg: "admin role required" });
+  if (!isManagerRole(ctx.user.role)) {
+    reply.code(403).send({ code: 403, msg: "权限不足：需要管理员角色" });
     return null;
   }
   return ctx;
 }
 
-async function countActiveAdmins(): Promise<number> {
+/** super_admin 或 admin 可管理账号；viewer 禁止。 */
+async function requireAccountManager(req: FastifyRequest, reply: FastifyReply) {
+  const ctx = await requireAdmin(req, reply);
+  if (!ctx) return null;
+  if (!isManagerRole(ctx.user.role)) {
+    reply.code(403).send({ code: 403, msg: "权限不足，普通用户无法管理账号" });
+    return null;
+  }
+  return ctx;
+}
+
+/** @deprecated alias — use requireAccountManager */
+async function requireSuperAdmin(req: FastifyRequest, reply: FastifyReply) {
+  return requireAccountManager(req, reply);
+}
+
+async function countActivePrivilegedAdmins(): Promise<number> {
   const db = getDb();
   const rows = await db
     .select({ c: sql<number>`count(*)` })
     .from(adminUsers)
     .where(
-      and(eq(adminUsers.role, "admin"), eq(adminUsers.status, "active")),
+      and(
+        eq(adminUsers.status, "active"),
+        or(
+          eq(adminUsers.role, "admin"),
+          eq(adminUsers.role, "super_admin"),
+        )!,
+      ),
     );
   return Number(rows[0]?.c ?? 0);
+}
+
+async function countActiveAdmins(): Promise<number> {
+  return countActivePrivilegedAdmins();
 }
 
 function maskKey(key: string): string {
@@ -227,7 +263,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const username = body.username?.trim() || "";
     const password = body.password || "";
     if (!username || !password) {
-      return reply.code(400).send({ code: 400, msg: "username/password required" });
+      return reply
+        .code(400)
+        .send({ code: 400, msg: "请输入用户名和密码" });
     }
 
     const db = getDb();
@@ -237,11 +275,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       .where(eq(adminUsers.username, username))
       .limit(1);
     const user = rows[0];
+    // Stable Chinese message for wrong password / unknown user (no user enumeration detail)
     if (!user || !verifyPassword(password, user.passwordHash)) {
-      return reply.code(401).send({ code: 401, msg: "invalid credentials" });
+      return reply.code(401).send({ code: 401, msg: "用户名或密码错误" });
     }
     if (user.status !== "active") {
-      return reply.code(403).send({ code: 403, msg: "account disabled" });
+      return reply.code(403).send({ code: 403, msg: "账号已禁用" });
     }
 
     const token = signToken({
@@ -268,15 +307,15 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
-  // —— Current admin profile ——
+  // —— Current admin profile (viewer may read/update self) ——
   app.get("/admin/api/me", async (req, reply) => {
-    const session = await requireAdmin(req, reply);
+    const session = await requireAuth(req, reply);
     if (!session) return;
     return { code: 0, user: toPublicAdminUser(session.user) };
   });
 
   app.put("/admin/api/me", async (req, reply) => {
-    const session = await requireAdmin(req, reply);
+    const session = await requireAuth(req, reply);
     if (!session) return;
     const body = (req.body ?? {}) as {
       display_name?: string;
@@ -292,10 +331,14 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (body.display_name !== undefined) {
       const dn = String(body.display_name).trim();
       if (dn.length > 64) {
-        return reply.code(400).send({ code: 400, msg: "display_name too long" });
+        return reply.code(400).send({ code: 400, msg: "显示名过长（最多 64 字）" });
       }
       patch.displayName = dn;
     }
+
+    const usernameChanging =
+      body.username !== undefined &&
+      String(body.username).trim() !== session.user.username;
 
     if (body.username !== undefined) {
       const un = String(body.username).trim();
@@ -308,23 +351,44 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
           .where(eq(adminUsers.username, un))
           .limit(1);
         if (clash.length > 0) {
-          return reply.code(409).send({ code: 409, msg: "username already taken" });
+          return reply.code(409).send({ code: 409, msg: "用户名已存在" });
         }
         patch.username = un;
       }
     }
 
+    // Username is in JWT claims — bump token_version so old tokens die.
+    const writePatch: Record<string, unknown> = { ...patch };
+    if (usernameChanging) {
+      writePatch.tokenVersion = (session.user.tokenVersion ?? 0) + 1;
+    }
+
     const updated = await db
       .update(adminUsers)
-      .set(patch)
+      .set(writePatch)
       .where(eq(adminUsers.id, session.user.id))
       .returning();
     const u = updated[0];
+    if (usernameChanging) {
+      const token = signToken({
+        sub: u.id,
+        username: u.username,
+        role: u.role,
+        tv: u.tokenVersion ?? 0,
+        exp: Date.now() + 12 * 60 * 60 * 1000,
+      });
+      return {
+        code: 0,
+        msg: "ok",
+        token,
+        user: toPublicAdminUser(u),
+      };
+    }
     return { code: 0, msg: "ok", user: toPublicAdminUser(u) };
   });
 
   app.put("/admin/api/me/password", async (req, reply) => {
-    const session = await requireAdmin(req, reply);
+    const session = await requireAuth(req, reply);
     if (!session) return;
     const body = (req.body ?? {}) as {
       current_password?: string;
@@ -336,17 +400,17 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     if (!oldPassword || !newPassword) {
       return reply
         .code(400)
-        .send({ code: 400, msg: "current_password and new_password required" });
+        .send({ code: 400, msg: "请填写原密码和新密码" });
     }
     if (!verifyPassword(oldPassword, session.user.passwordHash)) {
-      return reply.code(401).send({ code: 401, msg: "old password incorrect" });
+      return reply.code(401).send({ code: 401, msg: "原密码错误" });
     }
     const pol = validatePasswordPolicy(newPassword);
     if (pol) return reply.code(400).send({ code: 400, msg: pol });
     if (oldPassword === newPassword) {
       return reply
         .code(400)
-        .send({ code: 400, msg: "new password must differ from old password" });
+        .send({ code: 400, msg: "新密码不能与原密码相同" });
     }
 
     const db = getDb();
@@ -503,31 +567,17 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
           .code(400)
           .send({ code: 400, msg: "status must be active|disabled" });
       }
-      // Cannot disable the last active admin
+      // Cannot disable the last active privileged admin (admin|super_admin)
       if (
         body.status === "disabled" &&
         target.status === "active" &&
-        target.role === "admin"
+        isManagerRole(target.role)
       ) {
         const activeAdmins = await countActiveAdmins();
         if (activeAdmins <= 1) {
           return reply.code(400).send({
             code: 400,
             msg: "cannot disable the last active admin",
-          });
-        }
-      }
-      // Demoting last admin also blocked
-      if (
-        body.role === "viewer" &&
-        target.role === "admin" &&
-        target.status === "active"
-      ) {
-        const activeAdmins = await countActiveAdmins();
-        if (activeAdmins <= 1) {
-          return reply.code(400).send({
-            code: 400,
-            msg: "cannot demote the last active admin",
           });
         }
       }
@@ -538,12 +588,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    // Separate check if only role demotion without status in body
+    // Demoting last privileged admin is blocked (role change alone or with status)
     if (
       body.role === "viewer" &&
-      target.role === "admin" &&
+      isManagerRole(target.role) &&
       target.status === "active" &&
-      body.status === undefined
+      (body.status === undefined || body.status === "active")
     ) {
       const activeAdmins = await countActiveAdmins();
       if (activeAdmins <= 1) {
@@ -554,12 +604,52 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
+    // Role/status change invalidates existing sessions for that account
+    if (body.role !== undefined || body.status === "disabled") {
+      patch.tokenVersion =
+        patch.tokenVersion ?? (target.tokenVersion ?? 0) + 1;
+    }
+
     const updated = await db
       .update(adminUsers)
       .set(patch)
       .where(eq(adminUsers.id, id))
       .returning();
     return { code: 0, msg: "ok", user: toPublicAdminUser(updated[0]) };
+  });
+
+  /** Hard-delete account with last-admin and self-delete guards. */
+  app.delete("/admin/api/admin-users/:id", async (req, reply) => {
+    const session = await requireAccountManager(req, reply);
+    if (!session) return;
+    const id = Number((req.params as { id?: string }).id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return reply.code(400).send({ code: 400, msg: "invalid id" });
+    }
+    if (id === session.user.id) {
+      return reply.code(400).send({ code: 400, msg: "cannot delete yourself" });
+    }
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(adminUsers)
+      .where(eq(adminUsers.id, id))
+      .limit(1);
+    const target = rows[0];
+    if (!target) {
+      return reply.code(404).send({ code: 404, msg: "user not found" });
+    }
+    if (target.status === "active" && isManagerRole(target.role)) {
+      const activeAdmins = await countActiveAdmins();
+      if (activeAdmins <= 1) {
+        return reply.code(400).send({
+          code: 400,
+          msg: "cannot delete the last active admin",
+        });
+      }
+    }
+    await db.delete(adminUsers).where(eq(adminUsers.id, id));
+    return { code: 0, msg: "ok" };
   });
 
   app.post("/admin/api/admin-users/:id/reset-password", async (req, reply) => {
@@ -601,7 +691,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.post("/admin/api/logout", async () => ({ code: 0, msg: "ok" }));
 
   app.get("/admin/api/orders", async (req, reply) => {
-    const session = await requireAdmin(req, reply);
+    // Read-only order list: any authenticated console user (incl. viewer).
+    const session = await requireAuth(req, reply);
     if (!session) return;
 
     const q = req.query as {
@@ -647,7 +738,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.get("/admin/api/orders/:tradeNo", async (req, reply) => {
-    const session = await requireAdmin(req, reply);
+    // Read-only order detail: any authenticated console user (incl. viewer).
+    const session = await requireAuth(req, reply);
     if (!session) return;
     const { tradeNo } = req.params as { tradeNo: string };
     const db = getDb();
@@ -733,6 +825,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.get("/admin/api/channels/alipay", async (req, reply) => {
+    // Config view is redacted; still require admin (not viewer) — secrets surface area.
     const session = await requireAdmin(req, reply);
     if (!session) return;
     const db = getDb();
