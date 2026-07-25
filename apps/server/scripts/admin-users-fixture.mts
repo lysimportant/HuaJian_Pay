@@ -44,7 +44,7 @@ async function json(
   } catch {
     body = { raw: res.body };
   }
-  return { status: res.statusCode, body };
+  return { status: res.statusCode, body, headers: res.headers };
 }
 
 await initDb();
@@ -130,11 +130,25 @@ const vLogin = await json(app, "POST", "/admin/api/login", {
   body: { username: "viewer1", password: "viewer_pass1" },
 });
 assert(vLogin.status === 200, "viewer login");
+assert(
+  (vLogin.body.user as { role?: string }).role === "viewer",
+  "viewer login must return viewer role",
+);
 const vToken = String(vLogin.body.token);
 const vList = await json(app, "GET", "/admin/api/admin-users", { token: vToken });
 assert(vList.status === 403, "viewer list forbidden");
 const vMe = await json(app, "GET", "/admin/api/me", { token: vToken });
 assert(vMe.status === 200, "viewer me ok");
+assert(
+  (vMe.body.user as { role?: string }).role === "viewer",
+  "viewer me must not reuse administrator identity",
+);
+assert(
+  String(vMe.headers["cache-control"]).includes("private") &&
+    String(vMe.headers["cache-control"]).includes("no-store"),
+  "viewer me must disable shared/storage caching",
+);
+assert(vMe.headers.vary === "Authorization", "viewer me must vary by token");
 const vCreate = await json(app, "POST", "/admin/api/admin-users", {
   token: vToken,
   body: { username: "x", password: "password1", role: "viewer" },

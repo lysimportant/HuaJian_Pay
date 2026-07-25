@@ -315,6 +315,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   app.get("/admin/api/me", async (req, reply) => {
     const session = await requireAuth(req, reply);
     if (!session) return;
+    reply.header("Cache-Control", "private, no-store, max-age=0");
+    reply.header("Pragma", "no-cache");
+    reply.header("Vary", "Authorization");
     return { code: 0, user: toPublicAdminUser(session.user) };
   });
 
