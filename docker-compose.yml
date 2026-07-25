@@ -1,4 +1,4 @@
-# HuaJian_Pay — API only (recommended production)
+# HuaJian_Pay - API only (recommended production)
 #
 #   cp .env.production.example .env
 #   # edit APP_URL / secrets / channel keys
@@ -6,9 +6,9 @@
 #   curl http://127.0.0.1:8080/health
 #
 # Host Nginx (HTTPS + Admin static + reverse proxy API):
-#   deploy/nginx-host.conf  → upstream 127.0.0.1:8080
+#   deploy/nginx-host.conf  -> upstream 127.0.0.1:8080
 #
-# Optional: also run Admin inside Compose (not recommended if host Nginx serves SPA):
+# Optional Admin inside Compose (only if host Nginx does not serve SPA):
 #   docker compose --profile web up -d --build
 
 name: huajian-pay
@@ -33,7 +33,7 @@ services:
     volumes:
       - huajian_pay_data:/data
     ports:
-      # Only loopback by default — put host Nginx TLS in front
+      # Loopback only; put host Nginx TLS in front
       - "${API_HOST_BIND:-127.0.0.1}:${API_HOST_PORT:-8080}:8080"
     healthcheck:
       test:
